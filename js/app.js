@@ -1,0 +1,518 @@
+// ===== 커피챗 신청 앱 =====
+"use strict";
+
+const state = {
+  method: null,      // 식사 | 커피 | 운동 | 기타
+  subType: null,     // place | custom | sport
+  subLabel: null,    // 장소/종목/자유 텍스트
+  placeSid: null,
+  date: null,        // 일(day number)
+  slot: null,        // 시간대 key
+  time: null,        // "HH:MM"
+};
+
+let busyMap = {};        // { "5": ["점심", ...] } 서버(예약+캘린더)에서 받은 찬 시간
+let busyLoaded = false;
+
+// ---------- 유틸 ----------
+const $ = (sel) => document.querySelector(sel);
+const $$ = (sel) => document.querySelectorAll(sel);
+
+function slotByKey(key) { return SLOTS.find((s) => s.key === key); }
+
+function isSlotFree(day, slotKey) {
+  const blocked = BLOCKED[day];
+  if (blocked === "all") return false;
+  if (Array.isArray(blocked) && blocked.includes(slotKey)) return false;
+  const busy = busyMap[String(day)];
+  if (busy && busy.includes(slotKey)) return false;
+  return true;
+}
+
+function freeSlotCount(day) {
+  return SLOTS.filter((s) => isSlotFree(day, s.key)).length;
+}
+
+function isPastDay(day) {
+  const today = new Date();
+  const d = new Date(YEAR, MONTH - 1, day);
+  const t0 = new Date(today.getFullYear(), today.getMonth(), today.getDate());
+  return d < t0;
+}
+
+// ---------- 스텝 이동 ----------
+function goStep(n) {
+  ["step1", "step2", "step3", "step4", "stepDone"].forEach((id) => $("#" + id).classList.add("hidden"));
+  $("#" + (n === "done" ? "stepDone" : "step" + n)).classList.remove("hidden");
+  $$(".step-dot").forEach((dot) => {
+    const s = Number(dot.dataset.step);
+    dot.classList.toggle("active", s === n);
+    dot.classList.toggle("done", n !== "done" ? s < n : true);
+  });
+  $("#apply").scrollIntoView({ behavior: "smooth", block: "start" });
+}
+
+// ---------- STEP 1: 방법 ----------
+$$(".method-card").forEach((btn) => {
+  btn.addEventListener("click", () => {
+    state.method = btn.dataset.method;
+    state.subType = null; state.subLabel = null; state.placeSid = null;
+    renderStep2();
+    goStep(2);
+  });
+});
+
+// ---------- STEP 2: 하위 선택 ----------
+function renderStep2() {
+  const el = $("#step2");
+  if (state.method === "식사") {
+    el.innerHTML = `
+      <p class="step-title">🍚 어디서 먹을까요?</p>
+      <p class="hint">제가 아끼는 맛집 리스트예요. ⭐찐맛집 · ✅검증된 맛집부터 골라보세요!</p>
+      ${pickerHTML("meal")}`;
+    initPicker("meal");
+  } else if (state.method === "커피") {
+    el.innerHTML = `
+      <p class="step-title">☕ 어느 카페로 갈까요?</p>
+      <p class="hint">💡 사실 저는 카페를 잘 몰라요… 좋은 곳 아시면 <b>직접 추천</b>해주시면 더 좋아요!</p>
+      ${pickerHTML("cafe")}`;
+    initPicker("cafe");
+  } else if (state.method === "운동") {
+    el.innerHTML = `
+      <p class="step-title">🏸 어떤 운동을 할까요?</p>
+      <div class="sport-grid">
+        ${SPORTS.map((s) => `<button class="sport-card" data-sport="${s.name}"><span class="s-emoji">${s.emoji}</span>${s.name}</button>`).join("")}
+        <button class="sport-card" data-sport="__custom"><span class="s-emoji">✏️</span>직접 제안</button>
+      </div>
+      <div class="custom-wrap hidden" id="customWrap">
+        <input type="text" id="customInput" placeholder="하고 싶은 운동을 알려주세요!" maxlength="40">
+      </div>
+      ${navRowHTML()}`;
+    $$("#step2 .sport-card").forEach((btn) => {
+      btn.addEventListener("click", () => {
+        $$("#step2 .sport-card").forEach((b) => b.classList.remove("selected"));
+        btn.classList.add("selected");
+        if (btn.dataset.sport === "__custom") {
+          $("#customWrap").classList.remove("hidden");
+          state.subType = "custom"; state.subLabel = $("#customInput").value.trim();
+          $("#customInput").focus();
+        } else {
+          $("#customWrap").classList.add("hidden");
+          state.subType = "sport"; state.subLabel = btn.dataset.sport;
+        }
+        updateNext2();
+      });
+    });
+    bindCustomInput();
+    bindNavRow();
+  } else {
+    el.innerHTML = `
+      <p class="step-title">✨ 자유롭게 제안해주세요!</p>
+      <p class="hint">보드게임, 산책, 전시… 뭐든 환영이에요.</p>
+      <div class="custom-wrap">
+        <input type="text" id="customInput" placeholder="예: 보드게임 카페 가요!" maxlength="60">
+      </div>
+      ${navRowHTML()}`;
+    state.subType = "custom";
+    bindCustomInput();
+    bindNavRow();
+  }
+}
+
+function navRowHTML() {
+  return `
+    <div class="nav-row">
+      <button class="btn-back" data-back="1">← 이전</button>
+      <button class="btn-next" id="toStep3" disabled style="opacity:.5">다음 →</button>
+    </div>`;
+}
+
+function bindCustomInput() {
+  const inp = $("#customInput");
+  if (!inp) return;
+  inp.addEventListener("input", () => {
+    if (state.subType === "custom") state.subLabel = inp.value.trim();
+    updateNext2();
+  });
+}
+
+function bindNavRow() {
+  const back = $("#step2 .btn-back");
+  if (back) back.addEventListener("click", () => goStep(Number(back.dataset.back)));
+  const next = $("#toStep3");
+  if (next) next.addEventListener("click", () => {
+    if (!state.subLabel) return;
+    renderCalendar();
+    goStep(3);
+  });
+}
+
+function updateNext2() {
+  const next = $("#toStep3");
+  if (!next) return;
+  const ok = !!state.subLabel;
+  next.disabled = !ok;
+  next.style.opacity = ok ? "1" : ".5";
+}
+
+// ---------- 장소 선택 컴포넌트 (식사/커피 공용) ----------
+const pickerCtx = { mode: "meal", tier: 0, cat: "전체", region: "전체", q: "", view: "list", map: null, markers: [], infoWin: null };
+
+function pickerHTML(mode) {
+  const isCafe = mode === "cafe";
+  const regions = [...new Set(PLACES.filter((p) => !isCafe || p.c === "카페").map((p) => p.r))].sort();
+  return `
+    <div class="view-toggle">
+      <button id="vwMap">🗺️ 지도</button>
+      <button id="vwList" class="on">📃 리스트</button>
+    </div>
+    <div class="filter-row">
+      <button class="chip tier-chip on" data-tier="0">전체</button>
+      <button class="chip tier-chip" data-tier="3">⭐ 찐맛집</button>
+      <button class="chip tier-chip" data-tier="2">✅ 검증된</button>
+      ${isCafe ? "" : `
+      <button class="chip cat-chip on" data-cat="전체">모든 종류</button>
+      <button class="chip cat-chip" data-cat="식사">🍚 식사</button>
+      <button class="chip cat-chip" data-cat="카페">☕ 카페</button>
+      <button class="chip cat-chip" data-cat="술·바">🍺 술·바</button>`}
+      <select class="region-select" id="regionSel">
+        <option value="전체">모든 지역</option>
+        ${regions.map((r) => `<option value="${r}">${r}</option>`).join("")}
+      </select>
+      <input class="search-input" id="placeSearch" placeholder="🔍 이름/주소 검색">
+    </div>
+    <p class="count-label" id="countLabel"></p>
+    <div id="mapBox" class="hidden"></div>
+    <div class="place-list" id="placeList"></div>
+    <button class="etc-toggle" id="etcToggle">✏️ 리스트에 없어요! 제가 추천할게요 (etc)</button>
+    <div class="custom-wrap hidden" id="customWrap">
+      <input type="text" id="customInput" placeholder="${isCafe ? "추천하고 싶은 카페를 알려주세요!" : "추천하고 싶은 맛집을 알려주세요!"}" maxlength="60">
+    </div>
+    ${navRowHTML()}`;
+}
+
+function initPicker(mode) {
+  pickerCtx.mode = mode; pickerCtx.tier = 0; pickerCtx.cat = "전체";
+  pickerCtx.region = "전체"; pickerCtx.q = ""; pickerCtx.view = "list";
+  pickerCtx.map = null; pickerCtx.markers = [];
+
+  $$("#step2 .tier-chip").forEach((c) => c.addEventListener("click", () => {
+    $$("#step2 .tier-chip").forEach((x) => x.classList.remove("on"));
+    c.classList.add("on");
+    pickerCtx.tier = Number(c.dataset.tier);
+    refreshPicker();
+  }));
+  $$("#step2 .cat-chip").forEach((c) => c.addEventListener("click", () => {
+    $$("#step2 .cat-chip").forEach((x) => x.classList.remove("on"));
+    c.classList.add("on");
+    pickerCtx.cat = c.dataset.cat;
+    refreshPicker();
+  }));
+  $("#regionSel").addEventListener("change", (e) => { pickerCtx.region = e.target.value; refreshPicker(); });
+  $("#placeSearch").addEventListener("input", (e) => { pickerCtx.q = e.target.value.trim(); refreshPicker(); });
+
+  $("#vwList").addEventListener("click", () => setPickerView("list"));
+  $("#vwMap").addEventListener("click", () => setPickerView("map"));
+
+  $("#etcToggle").addEventListener("click", () => {
+    $("#customWrap").classList.toggle("hidden");
+    if (!$("#customWrap").classList.contains("hidden")) {
+      state.subType = "custom"; state.subLabel = $("#customInput").value.trim(); state.placeSid = null;
+      $$("#step2 .place-item").forEach((x) => x.classList.remove("selected"));
+      $("#customInput").focus();
+      updateNext2();
+    }
+  });
+  bindCustomInput();
+  bindNavRow();
+  refreshPicker();
+}
+
+function filteredPlaces() {
+  const isCafe = pickerCtx.mode === "cafe";
+  return PLACES.filter((p) => {
+    if (isCafe && p.c !== "카페") return false;
+    if (pickerCtx.tier && p.t !== pickerCtx.tier) return false;
+    if (!isCafe && pickerCtx.cat !== "전체" && p.c !== pickerCtx.cat) return false;
+    if (pickerCtx.region !== "전체" && p.r !== pickerCtx.region) return false;
+    if (pickerCtx.q && !(p.n.includes(pickerCtx.q) || p.a.includes(pickerCtx.q))) return false;
+    return true;
+  });
+}
+
+function tierBadge(p) {
+  if (p.t === 3) return `<span class="pi-badge badge-t3">⭐ 찐맛집</span>`;
+  if (p.t === 2) return `<span class="pi-badge badge-t2">✅ 검증된</span>`;
+  return "";
+}
+
+function refreshPicker() {
+  const list = filteredPlaces();
+  $("#countLabel").textContent = `${list.length}곳`;
+  const box = $("#placeList");
+  box.innerHTML = list.map((p) => `
+    <button class="place-item ${state.placeSid === p.sid ? "selected" : ""}" data-sid="${p.sid}">
+      <div>
+        <span class="pi-name">${p.n}</span>${tierBadge(p)}
+        <div class="pi-addr">${p.c} · ${p.a}</div>
+      </div>
+      <a class="pi-link" href="https://map.naver.com/p/entry/place/${p.sid}" target="_blank" rel="noopener" onclick="event.stopPropagation()">네이버 ↗</a>
+    </button>`).join("") || `<p class="hint">조건에 맞는 곳이 없어요 😢</p>`;
+  $$("#step2 .place-item").forEach((item) => {
+    item.addEventListener("click", () => selectPlace(item.dataset.sid));
+  });
+  if (pickerCtx.view === "map") renderMarkers(list);
+}
+
+function selectPlace(sid) {
+  const p = PLACES.find((x) => x.sid === sid);
+  if (!p) return;
+  state.subType = "place"; state.subLabel = p.n; state.placeSid = sid;
+  $("#customWrap").classList.add("hidden");
+  $$("#step2 .place-item").forEach((x) => x.classList.toggle("selected", x.dataset.sid === sid));
+  updateNext2();
+}
+window.__selectPlace = selectPlace; // 지도 인포윈도우에서 사용
+
+function setPickerView(view) {
+  pickerCtx.view = view;
+  $("#vwList").classList.toggle("on", view === "list");
+  $("#vwMap").classList.toggle("on", view === "map");
+  $("#placeList").classList.toggle("hidden", view === "map");
+  $("#mapBox").classList.toggle("hidden", view !== "map");
+  if (view === "map") ensureMap();
+}
+
+// ---------- 네이버 지도 ----------
+let naverLoading = false;
+function ensureMap() {
+  if (!CONFIG.NAVER_CLIENT_ID) {
+    $("#mapBox").innerHTML = `<div class="map-notice">🗺️ 지도는 준비 중이에요!<br>아래 리스트에서 골라주세요 🙏</div>`;
+    $("#mapBox").style.height = "auto";
+    return;
+  }
+  if (window.naver && window.naver.maps) { buildMap(); return; }
+  if (naverLoading) return;
+  naverLoading = true;
+  const s = document.createElement("script");
+  s.src = `https://oapi.map.naver.com/openapi/v3/maps.js?ncpKeyId=${CONFIG.NAVER_CLIENT_ID}`;
+  s.onload = buildMap;
+  document.head.appendChild(s);
+}
+
+function buildMap() {
+  if (!$("#mapBox") || $("#mapBox").classList.contains("hidden")) return;
+  pickerCtx.map = new naver.maps.Map("mapBox", {
+    center: new naver.maps.LatLng(37.4783, 126.9527), // 서울대입구
+    zoom: 13,
+  });
+  pickerCtx.infoWin = new naver.maps.InfoWindow({ content: "", borderWidth: 0, backgroundColor: "transparent", disableAnchor: true });
+  renderMarkers(filteredPlaces());
+}
+
+function markerColor(t) { return t === 3 ? "#e8a020" : t === 2 ? "#5c8a58" : "#8b5e34"; }
+
+function renderMarkers(list) {
+  if (!pickerCtx.map || !(window.naver && window.naver.maps)) return;
+  pickerCtx.markers.forEach((m) => m.setMap(null));
+  pickerCtx.markers = [];
+  list.forEach((p) => {
+    const marker = new naver.maps.Marker({
+      position: new naver.maps.LatLng(p.lat, p.lng),
+      map: pickerCtx.map,
+      title: p.n,
+      icon: {
+        content: `<div style="width:${p.t === 3 ? 18 : 13}px;height:${p.t === 3 ? 18 : 13}px;border-radius:50%;background:${markerColor(p.t)};border:2px solid #fff;box-shadow:0 1px 4px rgba(0,0,0,.4)"></div>`,
+        anchor: new naver.maps.Point(8, 8),
+      },
+    });
+    naver.maps.Event.addListener(marker, "click", () => {
+      pickerCtx.infoWin.setContent(`
+        <div style="background:#fff;border-radius:12px;box-shadow:0 4px 14px rgba(0,0,0,.25);padding:12px 14px;font-family:Pretendard,sans-serif;max-width:230px">
+          <b style="font-size:15px">${p.n}</b> ${p.t === 3 ? "⭐" : p.t === 2 ? "✅" : ""}
+          <div style="font-size:12px;color:#8a7060;margin:4px 0">${p.c} · ${p.a}</div>
+          <div style="display:flex;gap:6px;margin-top:8px">
+            <button onclick="__selectPlace('${p.sid}')" style="flex:1;background:#c47b3f;color:#fff;border:none;border-radius:8px;padding:7px;font-weight:700;cursor:pointer;font-family:inherit">이곳 선택 ✓</button>
+            <a href="https://map.naver.com/p/entry/place/${p.sid}" target="_blank" rel="noopener" style="background:#f3e2cd;color:#8b5e34;border-radius:8px;padding:7px 10px;font-size:12px;font-weight:700;text-decoration:none">상세 ↗</a>
+          </div>
+        </div>`);
+      pickerCtx.infoWin.open(pickerCtx.map, marker);
+    });
+    pickerCtx.markers.push(marker);
+  });
+}
+
+// ---------- STEP 3: 달력 ----------
+function renderCalendar() {
+  const cal = $("#calendar");
+  const firstDow = new Date(YEAR, MONTH - 1, 1).getDay(); // 0=일
+  const daysInMonth = new Date(YEAR, MONTH, 0).getDate();
+  const dows = ["일", "월", "화", "수", "목", "금", "토"];
+  let html = `<div class="cal-header">${YEAR}년 ${MONTH}월</div><div class="cal-grid">`;
+  html += dows.map((d) => `<div class="cal-dow">${d}</div>`).join("");
+  for (let i = 0; i < firstDow; i++) html += `<div class="cal-empty"></div>`;
+  for (let day = 1; day <= daysInMonth; day++) {
+    const free = freeSlotCount(day);
+    const disabled = isPastDay(day) || free === 0;
+    const dots = "●".repeat(Math.min(free, 4));
+    html += `<button class="cal-day ${state.date === day ? "selected" : ""}" data-day="${day}" ${disabled ? "disabled" : ""}>
+      ${day}${disabled ? "" : `<span class="avail-dots">${dots}</span>`}</button>`;
+  }
+  html += `</div>`;
+  cal.innerHTML = html;
+  $$(".cal-day:not(:disabled)").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      state.date = Number(btn.dataset.day);
+      state.slot = null; state.time = null;
+      $$(".cal-day").forEach((b) => b.classList.toggle("selected", Number(b.dataset.day) === state.date));
+      renderSlots();
+      updateNext3();
+    });
+  });
+  $("#step3 .btn-back").onclick = () => goStep(2);
+  $("#toStep4").onclick = () => {
+    if (!validStep3()) return;
+    renderSummary();
+    goStep(4);
+  };
+  $("#slotPicker").classList.add("hidden");
+  if (!busyLoaded && CONFIG.API_URL) {
+    const hint = document.createElement("p");
+    hint.className = "hint"; hint.id = "busyLoadingHint";
+    hint.textContent = "⏳ 예약 현황을 불러오는 중…";
+    cal.appendChild(hint);
+  }
+}
+
+function renderSlots() {
+  $("#slotPicker").classList.remove("hidden");
+  $("#slotDateLabel").textContent = `9월 ${state.date}일, 시간대를 골라주세요`;
+  $("#slotGrid").innerHTML = SLOTS.map((s) => {
+    const free = isSlotFree(state.date, s.key);
+    return `<button class="slot-chip ${state.slot === s.key ? "selected" : ""}" data-slot="${s.key}" ${free ? "" : "disabled"}>
+      ${s.key}<small>${s.label}</small></button>`;
+  }).join("");
+  $$(".slot-chip:not(:disabled)").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      state.slot = btn.dataset.slot;
+      $$(".slot-chip").forEach((b) => b.classList.toggle("selected", b.dataset.slot === state.slot));
+      showTimeInput();
+      updateNext3();
+    });
+  });
+  $("#timeInputWrap").classList.add("hidden");
+}
+
+function showTimeInput() {
+  const s = slotByKey(state.slot);
+  const wrap = $("#timeInputWrap");
+  wrap.classList.remove("hidden");
+  const inp = $("#exactTime");
+  const pad = (n) => String(n).padStart(2, "0");
+  inp.min = `${pad(s.from)}:00`;
+  inp.max = s.to === 24 ? "23:59" : `${pad(s.to - 1)}:59`;
+  inp.value = `${pad(s.from)}:00`;
+  state.time = inp.value;
+  $("#timeRangeHint").textContent = `${s.key} 시간대(${s.label}) 안에서 정해주세요`;
+  inp.onchange = () => {
+    const [h, m] = inp.value.split(":").map(Number);
+    const okRange = s.to === 24 ? h >= s.from : (h >= s.from && h < s.to);
+    if (!okRange) {
+      inp.value = `${pad(s.from)}:00`;
+      $("#timeRangeHint").textContent = `⚠️ ${s.label} 사이로만 정할 수 있어요!`;
+    }
+    state.time = inp.value;
+    updateNext3();
+  };
+}
+
+function validStep3() { return state.date && state.slot && state.time; }
+function updateNext3() {
+  $("#toStep4").classList.toggle("hidden", !validStep3());
+}
+
+// ---------- STEP 4 ----------
+function locationLabel() {
+  if (state.method === "운동") return state.subLabel;
+  return state.subLabel;
+}
+
+function methodLine() {
+  const emo = { 식사: "🍚", 커피: "☕", 운동: "🏸", 기타: "✨" };
+  return `${emo[state.method]} ${state.method}`;
+}
+
+function renderSummary() {
+  $("#summary").innerHTML = `
+    <div><b>방법</b> ${methodLine()}</div>
+    <div><b>${state.method === "운동" ? "종목" : "장소"}</b> ${state.subLabel}${state.subType === "custom" ? " (직접 추천)" : ""}</div>
+    <div><b>날짜</b> 9월 ${state.date}일</div>
+    <div><b>시간</b> ${state.slot} · ${state.time}</div>`;
+  $("#step4 .btn-back").onclick = () => goStep(3);
+}
+
+$("#submitBtn").addEventListener("click", async () => {
+  const name = $("#applicantName").value.trim();
+  const status = $("#submitStatus");
+  if (!name) { status.textContent = "⚠️ 이름을 입력해주세요!"; return; }
+  if (!validStep3()) { status.textContent = "⚠️ 날짜/시간을 다시 확인해주세요."; goStep(3); return; }
+  state.name = name;
+
+  if (!CONFIG.API_URL) {
+    status.textContent = "⚠️ 예약 시스템이 아직 연결 준비 중이에요. 잠시 후 다시 시도해주세요!";
+    return;
+  }
+
+  const btn = $("#submitBtn");
+  btn.disabled = true; btn.textContent = "신청 중… ☕";
+  try {
+    const res = await fetch(CONFIG.API_URL, {
+      method: "POST",
+      headers: { "Content-Type": "text/plain;charset=utf-8" },
+      body: JSON.stringify({
+        name: state.name,
+        method: state.method,
+        location: locationLabel(),
+        isCustom: state.subType === "custom",
+        date: state.date,
+        slot: state.slot,
+        time: state.time,
+      }),
+    });
+    const out = await res.json();
+    if (out.ok) {
+      $("#doneMsg").innerHTML = `<b>${state.name}</b>님, 9월 ${state.date}일 ${state.time}<br>「${state.subLabel}」에서 만나요!`;
+      goStep("done");
+    } else if (out.error === "slot_taken") {
+      status.textContent = "😢 아쉽게도 방금 다른 분이 그 시간을 선택했어요. 다른 시간을 골라주세요!";
+      await loadBusy();
+      renderCalendar();
+      goStep(3);
+    } else {
+      status.textContent = "⚠️ 오류가 발생했어요: " + (out.error || "알 수 없는 오류");
+    }
+  } catch (err) {
+    status.textContent = "⚠️ 네트워크 오류가 발생했어요. 잠시 후 다시 시도해주세요.";
+  } finally {
+    btn.disabled = false; btn.textContent = "커피챗 신청하기 🚀";
+  }
+});
+
+// ---------- 예약/캘린더 현황 로드 ----------
+async function loadBusy() {
+  if (!CONFIG.API_URL) { busyLoaded = true; return; }
+  try {
+    const res = await fetch(CONFIG.API_URL + "?action=busy");
+    const out = await res.json();
+    if (out.ok && out.busy) busyMap = out.busy;
+  } catch (err) {
+    console.warn("busy load failed", err);
+  }
+  busyLoaded = true;
+  const hint = $("#busyLoadingHint");
+  if (hint) hint.remove();
+  // 달력이 열려 있으면 갱신
+  if (!$("#step3").classList.contains("hidden")) renderCalendar();
+}
+
+loadBusy();
