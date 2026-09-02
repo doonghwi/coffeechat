@@ -141,6 +141,7 @@ main { max-width: 680px; margin: 0 auto; padding: 0 16px 60px; }
 .badge-t3 { background: #ffd98a; color: #7a5200; }
 .badge-t2 { background: #cde6c8; color: #2f5c2b; }
 .pi-addr { font-size: 12px; color: var(--sub); margin-top: 2px; }
+.pi-menu { font-size: 12px; color: var(--accent-deep); margin-top: 2px; }
 .pi-link { font-size: 12px; color: var(--accent-deep); text-decoration: none; white-space: nowrap; font-weight: 600;}
 .count-label { font-size: 13px; color: var(--sub); margin-bottom: 8px; }
 

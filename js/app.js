@@ -20,6 +20,74 @@ const $$ = (sel) => document.querySelectorAll(sel);
 
 function slotByKey(key) { return SLOTS.find((s) => s.key === key); }
 
+// ---------- 영업시간 판단 ----------
+const DOW_KO = ["일", "월", "화", "수", "목", "금", "토"];
+function toMin(t) { const [h, m] = t.split(":").map(Number); return h * 60 + m; }
+
+function hoursForDay(p, day) {
+  if (!p.h || !p.h.length) return null; // 데이터 없음
+  const dow = DOW_KO[new Date(YEAR, MONTH - 1, day).getDay()];
+  const match = p.h.filter((h) => {
+    const d = h.d || "";
+    if (d.includes("매일") || d.includes(dow)) return true;
+    if (d.includes("~")) { // 예: "월~금"
+      const parts = d.split("~");
+      const ai = DOW_KO.indexOf(parts[0].trim().charAt(0));
+      const bi = DOW_KO.indexOf(parts[1].trim().charAt(0));
+      const di = DOW_KO.indexOf(dow);
+      if (ai >= 0 && bi >= 0) return ai <= bi ? (di >= ai && di <= bi) : (di >= ai || di <= bi);
+    }
+    return false;
+  });
+  return match;
+}
+
+// true=영업중 / false=영업 아님(가능성) / null=정보 없음
+function isOpenAt(p, day, time) {
+  const hs = hoursForDay(p, day);
+  if (hs === null) return null;
+  if (!hs.length) return false; // 그 요일 영업 정보 없음 → 휴무 가능성
+  const t = toMin(time);
+  for (const h of hs) {
+    let s = toMin(h.s), e = toMin(h.e);
+    if (e <= s) e += 1440; // 자정 넘김
+    const inMain = (t >= s && t < e) || (t + 1440 >= s && t + 1440 < e);
+    if (inMain) {
+      const inBreak = (h.b || []).some((br) => br[0] && t >= toMin(br[0]) && t < toMin(br[1]));
+      if (!inBreak) return true;
+    }
+  }
+  return false;
+}
+
+function checkOpenWarning() {
+  const el = $("#openWarn");
+  if (!el) return;
+  el.textContent = "";
+  if (state.subType !== "place" || !state.placeSid || !state.date || !state.time) return;
+  const p = PLACES.find((x) => x.sid === state.placeSid);
+  if (!p) return;
+  const open = isOpenAt(p, state.date, state.time);
+  if (open === false) {
+    el.innerHTML = `⚠️ 이 시간엔 <b>「${p.n}」</b>이(가) 영업하지 않을 수 있어요! 다른 시간이나 장소도 고려해주세요.`;
+    el.style.color = "#c0564a";
+  } else if (open === true) {
+    el.innerHTML = `✅ 이 시간에 <b>「${p.n}」</b> 영업 중이에요 (네이버 정보 기준)`;
+    el.style.color = "#5c8a58";
+  }
+}
+
+function menuLine(p, n) {
+  if (!p.m || !p.m.length) return "";
+  return p.m.slice(0, n).map((x) => x[0]).join(" · ");
+}
+
+function hoursLine(p) {
+  if (!p.h || !p.h.length) return "";
+  const h = p.h[0];
+  return `${h.d} ${h.s}~${h.e}${p.h.length > 1 ? " 외" : ""}`;
+}
+
 function isSlotFree(day, slotKey) {
   const blocked = BLOCKED[day];
   if (blocked === "all") return false;
@@ -260,6 +328,7 @@ function refreshPicker() {
       <div>
         <span class="pi-name">${p.n}</span>${tierBadge(p)}
         <div class="pi-addr">${p.c} · ${p.a}</div>
+        ${menuLine(p, 2) ? `<div class="pi-menu">🍽 ${menuLine(p, 2)}</div>` : ""}
       </div>
       <a class="pi-link" href="https://map.naver.com/p/entry/place/${p.sid}" target="_blank" rel="noopener" onclick="event.stopPropagation()">네이버 ↗</a>
     </button>`).join("") || `<p class="hint">조건에 맞는 곳이 없어요 😢</p>`;
@@ -336,6 +405,8 @@ function renderMarkers(list) {
         <div style="background:#fff;border-radius:12px;box-shadow:0 4px 14px rgba(0,0,0,.25);padding:12px 14px;font-family:Pretendard,sans-serif;max-width:230px">
           <b style="font-size:15px">${p.n}</b> ${p.t === 3 ? "⭐" : p.t === 2 ? "✅" : ""}
           <div style="font-size:12px;color:#8a7060;margin:4px 0">${p.c} · ${p.a}</div>
+          ${menuLine(p, 3) ? `<div style="font-size:12px;color:#3b2a1f;margin:2px 0">🍽 ${menuLine(p, 3)}</div>` : ""}
+          ${hoursLine(p) ? `<div style="font-size:12px;color:#8a7060;margin:2px 0">🕐 ${hoursLine(p)}</div>` : ""}
           <div style="display:flex;gap:6px;margin-top:8px">
             <button onclick="__selectPlace('${p.sid}')" style="flex:1;background:#c47b3f;color:#fff;border:none;border-radius:8px;padding:7px;font-weight:700;cursor:pointer;font-family:inherit">이곳 선택 ✓</button>
             <a href="https://map.naver.com/p/entry/place/${p.sid}" target="_blank" rel="noopener" style="background:#f3e2cd;color:#8b5e34;border-radius:8px;padding:7px 10px;font-size:12px;font-weight:700;text-decoration:none">상세 ↗</a>
@@ -431,8 +502,10 @@ function showTimeInput() {
       inp.value = `${pad(h)}:${pad(m)}`;
     }
     state.time = inp.value;
+    checkOpenWarning();
     updateNext3();
   };
+  checkOpenWarning();
 }
 
 function validStep3() { return state.date && state.slot && state.time; }
