@@ -12,6 +12,11 @@
  *   - 실행 계정: 나(Me)
  *   - 액세스 권한: 모든 사용자(Anyone)
  *   → 발급된 /exec URL을 js/config.js의 API_URL에 붙여넣기
+ *
+ * ★ 취소 방법: 구글 캘린더에서 해당 이벤트를 삭제하면 끝!
+ *   슬롯 참/빔은 오직 "캘린더"만 보고 판단하므로, 이벤트를 지우면
+ *   그 시간이 사이트에서 다시 신청 가능으로 바뀝니다.
+ *   (스프레드시트는 기록용 로그일 뿐 — 지우지 않아도 됩니다)
  */
 
 var YEAR = 2026;
@@ -63,22 +68,8 @@ function getSheet_() {
   return ss.getSheets()[0];
 }
 
-// 예약된 슬롯: { "5": ["점심"], ... }
-function bookingsBusy_() {
-  var sheet = getSheet_();
-  var rows = sheet.getDataRange().getValues();
-  var busy = {};
-  for (var i = 1; i < rows.length; i++) {
-    var day = String(rows[i][2]);
-    var slot = String(rows[i][3]);
-    if (!day || !slot) continue;
-    if (!busy[day]) busy[day] = [];
-    if (busy[day].indexOf(slot) < 0) busy[day].push(slot);
-  }
-  return busy;
-}
-
 // 내 구글 캘린더에서 참/빔만 계산 (제목·내용은 절대 반환하지 않음)
+// 예약 이벤트도 캘린더에 생성되므로, 캘린더가 유일한 기준(single source of truth)!
 function calendarBusy_() {
   var cal = CalendarApp.getDefaultCalendar();
   var start = new Date(YEAR, MONTH - 1, 1);
@@ -113,15 +104,7 @@ function calendarBusy_() {
 }
 
 function mergedBusy_() {
-  var a = bookingsBusy_();
-  var b = calendarBusy_();
-  for (var day in b) {
-    if (!a[day]) a[day] = [];
-    for (var i = 0; i < b[day].length; i++) {
-      if (a[day].indexOf(b[day][i]) < 0) a[day].push(b[day][i]);
-    }
-  }
-  return a;
+  return calendarBusy_(); // 캘린더에서 이벤트를 지우면 슬롯이 다시 열립니다
 }
 
 function isBlocked_(day, slot) {
@@ -157,6 +140,7 @@ function doPost(e) {
     var mm = parseInt(time.split(":")[1], 10);
     var range = SLOTS[slot];
     if (hh < range[0] || hh >= range[1]) return json_({ ok: false, error: "time_out_of_slot" });
+    if (mm % 10 !== 0) return json_({ ok: false, error: "time_out_of_slot" }); // 10분 단위만 허용
 
     if (isBlocked_(day, slot)) return json_({ ok: false, error: "slot_taken" });
     var busy = mergedBusy_();

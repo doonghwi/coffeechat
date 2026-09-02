@@ -156,15 +156,15 @@ function updateNext2() {
 }
 
 // ---------- 장소 선택 컴포넌트 (식사/커피 공용) ----------
-const pickerCtx = { mode: "meal", tier: 0, cat: "전체", region: "전체", q: "", view: "list", map: null, markers: [], infoWin: null };
+const pickerCtx = { mode: "meal", tier: 0, cat: "전체", region: "전체", q: "", view: "map", map: null, markers: [], infoWin: null };
 
 function pickerHTML(mode) {
   const isCafe = mode === "cafe";
   const regions = [...new Set(PLACES.filter((p) => !isCafe || p.c === "카페").map((p) => p.r))].sort();
   return `
     <div class="view-toggle">
-      <button id="vwMap">🗺️ 지도</button>
-      <button id="vwList" class="on">📃 리스트</button>
+      <button id="vwMap" class="on">🗺️ 지도</button>
+      <button id="vwList">📃 리스트</button>
     </div>
     <div class="filter-row">
       <button class="chip tier-chip on" data-tier="0">전체</button>
@@ -193,7 +193,7 @@ function pickerHTML(mode) {
 
 function initPicker(mode) {
   pickerCtx.mode = mode; pickerCtx.tier = 0; pickerCtx.cat = "전체";
-  pickerCtx.region = "전체"; pickerCtx.q = ""; pickerCtx.view = "list";
+  pickerCtx.region = "전체"; pickerCtx.q = ""; pickerCtx.view = "map";
   pickerCtx.map = null; pickerCtx.markers = [];
 
   $$("#step2 .tier-chip").forEach((c) => c.addEventListener("click", () => {
@@ -226,11 +226,12 @@ function initPicker(mode) {
   bindCustomInput();
   bindNavRow();
   refreshPicker();
+  setPickerView("map"); // 지도를 기본 화면으로
 }
 
 function filteredPlaces() {
   const isCafe = pickerCtx.mode === "cafe";
-  return PLACES.filter((p) => {
+  const list = PLACES.filter((p) => {
     if (isCafe && p.c !== "카페") return false;
     if (pickerCtx.tier && p.t !== pickerCtx.tier) return false;
     if (!isCafe && pickerCtx.cat !== "전체" && p.c !== pickerCtx.cat) return false;
@@ -238,6 +239,10 @@ function filteredPlaces() {
     if (pickerCtx.q && !(p.n.includes(pickerCtx.q) || p.a.includes(pickerCtx.q))) return false;
     return true;
   });
+  // 관악구 → 서울 → 그 외 순으로, 같은 지역에선 찐맛집/검증된 우선
+  const rank = (p) => (p.g === "관악구" ? 0 : p.r === "서울" ? 1 : 2);
+  list.sort((a, b) => rank(a) - rank(b) || b.t - a.t || a.n.localeCompare(b.n, "ko"));
+  return list;
 }
 
 function tierBadge(p) {
@@ -413,13 +418,17 @@ function showTimeInput() {
   inp.max = s.to === 24 ? "23:59" : `${pad(s.to - 1)}:59`;
   inp.value = `${pad(s.from)}:00`;
   state.time = inp.value;
-  $("#timeRangeHint").textContent = `${s.key} 시간대(${s.label}) 안에서 정해주세요`;
+  $("#timeRangeHint").textContent = `${s.key} 시간대(${s.label}) 안에서 10분 단위로 정해주세요`;
   inp.onchange = () => {
-    const [h, m] = inp.value.split(":").map(Number);
-    const okRange = s.to === 24 ? h >= s.from : (h >= s.from && h < s.to);
+    let [h, m] = inp.value.split(":").map(Number);
+    m = Math.round(m / 10) * 10; // 10분 단위로 맞춤
+    if (m === 60) { h += 1; m = 0; }
+    const okRange = s.to === 24 ? (h >= s.from && h <= 23) : (h >= s.from && h < s.to);
     if (!okRange) {
       inp.value = `${pad(s.from)}:00`;
       $("#timeRangeHint").textContent = `⚠️ ${s.label} 사이로만 정할 수 있어요!`;
+    } else {
+      inp.value = `${pad(h)}:${pad(m)}`;
     }
     state.time = inp.value;
     updateNext3();
