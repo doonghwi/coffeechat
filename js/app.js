@@ -564,6 +564,19 @@ $("#submitBtn").addEventListener("click", async () => {
     });
     const out = await res.json();
     if (out.ok) {
+      // 서버에서 ntfy 발송에 실패했으면(구글 공유 IP 할당량 등) 브라우저에서 직접 발송
+      if (!out.ntfy) {
+        try {
+          fetch("https://ntfy.sh/coffeechat-doonghwi?title=" +
+            encodeURIComponent(`☕ 커피챗 신청: ${state.name}`) + "&priority=4&tags=coffee", {
+            method: "POST",
+            headers: { "Content-Type": "text/plain; charset=utf-8" },
+            body: `9월 ${state.date}일 ${state.time} · ${state.method} · ${state.subLabel}` +
+              (state.subType === "custom" ? " (신청자 추천)" : "") +
+              (state.message ? `\n\n💬 ${state.message}` : ""),
+          }).catch(() => {});
+        } catch (e) { /* 알림 실패는 무시 */ }
+      }
       $("#doneMsg").innerHTML = `<b>${state.name}</b>님, 9월 ${state.date}일 ${state.time}<br>「${state.subLabel}」에서 만나요!`;
       goStep("done");
     } else if (out.error === "slot_taken") {
