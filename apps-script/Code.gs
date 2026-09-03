@@ -153,8 +153,10 @@ function doPost(e) {
     // 시트 기록
     getSheet_().appendRow([new Date(), name, day, slot, time, method, location, b.isCustom ? "O" : "", message]);
 
-    // 캘린더 이벤트: "@@시 [이름] [위치] 커피챗" (2시간)
-    var timeLabel = hh + "시" + (mm > 0 ? mm + "분" : "");
+    // 캘린더 이벤트: "오전/오후 @@시 [이름] [위치] 커피챗" (2시간)
+    var ampm = hh < 12 ? "오전" : "오후";
+    var h12 = hh % 12; if (h12 === 0) h12 = 12;
+    var timeLabel = ampm + " " + h12 + "시" + (mm > 0 ? " " + mm + "분" : "");
     var title = timeLabel + " " + name + " [" + location + "] 커피챗";
     var startAt = new Date(YEAR, MONTH - 1, day, hh, mm);
     var endAt = new Date(startAt.getTime() + 2 * 60 * 60 * 1000);
