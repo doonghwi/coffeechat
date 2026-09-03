@@ -23,6 +23,12 @@
 var YEAR = 2026;
 var MONTH = 9; // 9월
 
+// ntfy 액세스 토큰 (필수!)
+// Apps Script는 구글 공유 IP를 쓰기 때문에 익명 발송은 429(할당량 초과)가 자주 뜹니다.
+// ntfy.sh에서 무료 계정 생성 → 우측 상단 계정 → Access tokens → CREATE ACCESS TOKEN
+// → "tk_..." 로 시작하는 토큰을 아래에 붙여넣으세요.
+var NTFY_TOKEN = "";
+
 // 프론트엔드 js/data.js와 반드시 동일하게 유지!
 var SLOTS = {
   "아침":   [7, 10],
@@ -195,12 +201,14 @@ function sendNtfy_(title, message) {
   var url = "https://ntfy.sh/coffeechat-doonghwi"
     + "?title=" + encodeURIComponent(title)
     + "&priority=4&tags=coffee";
-  return UrlFetchApp.fetch(url, {
+  var options = {
     method: "post",
     contentType: "text/plain; charset=utf-8",
     payload: message,
     muteHttpExceptions: true
-  });
+  };
+  if (NTFY_TOKEN) options.headers = { "Authorization": "Bearer " + NTFY_TOKEN };
+  return UrlFetchApp.fetch(url, options);
 }
 
 /**
