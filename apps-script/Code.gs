@@ -181,7 +181,10 @@ function doPost(e) {
         }),
         muteHttpExceptions: true
       });
-    } catch (ntfyErr) { /* 알림 실패는 무시 */ }
+    } catch (ntfyErr) {
+      // 알림 실패해도 예약은 성공 처리하되, 원인 추적을 위해 시트에 기록
+      try { getSheet_().appendRow(["[ntfy 실패]", String(ntfyErr)]); } catch (ignore) {}
+    }
 
     return json_({ ok: true });
   } catch (err) {
@@ -194,4 +197,26 @@ function doPost(e) {
 function json_(o) {
   return ContentService.createTextOutput(JSON.stringify(o))
     .setMimeType(ContentService.MimeType.JSON);
+}
+
+/**
+ * ★ ntfy 연결 테스트 (에디터에서 직접 실행용)
+ * 1. 상단 함수 선택에서 testNtfy 선택 → [실행] 클릭
+ * 2. "외부 서비스 연결" 권한 승인 창이 뜨면 승인
+ * 3. 휴대폰에 알림이 오면 성공! (실행 로그에 응답 코드 200 표시)
+ */
+function testNtfy() {
+  var res = UrlFetchApp.fetch("https://ntfy.sh", {
+    method: "post",
+    contentType: "application/json",
+    payload: JSON.stringify({
+      topic: "coffeechat-doonghwi",
+      title: "✅ Apps Script → ntfy 연결 성공!",
+      message: "이제 커피챗 신청이 들어오면 이 채널로 알림이 옵니다.",
+      priority: 4,
+      tags: ["tada"]
+    }),
+    muteHttpExceptions: true
+  });
+  Logger.log(res.getResponseCode() + " " + res.getContentText());
 }
