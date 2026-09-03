@@ -166,20 +166,12 @@ function doPost(e) {
 
     // ntfy 푸시 알림 (실패해도 예약은 성공 처리)
     try {
-      UrlFetchApp.fetch("https://ntfy.sh", {
-        method: "post",
-        contentType: "application/json",
-        payload: JSON.stringify({
-          topic: "coffeechat-doonghwi",
-          title: "☕ 커피챗 신청: " + name,
-          message: "9월 " + day + "일 " + time + " · " + method + " · " + location
-            + (b.isCustom ? " (신청자 추천)" : "")
-            + (message ? "\n\n💬 " + message : ""),
-          priority: 4,
-          tags: ["coffee"]
-        }),
-        muteHttpExceptions: true
-      });
+      sendNtfy_(
+        "☕ 커피챗 신청: " + name,
+        "9월 " + day + "일 " + time + " · " + method + " · " + location
+          + (b.isCustom ? " (신청자 추천)" : "")
+          + (message ? "\n\n💬 " + message : "")
+      );
     } catch (ntfyErr) {
       // 알림 실패해도 예약은 성공 처리하되, 원인 추적을 위해 시트에 기록
       try { getSheet_().appendRow(["[ntfy 실패]", String(ntfyErr)]); } catch (ignore) {}
@@ -198,6 +190,19 @@ function json_(o) {
     .setMimeType(ContentService.MimeType.JSON);
 }
 
+// ntfy 발송 공통 함수: 토픽 주소로 직접 POST (제목 등 한글은 URL 인코딩)
+function sendNtfy_(title, message) {
+  var url = "https://ntfy.sh/coffeechat-doonghwi"
+    + "?title=" + encodeURIComponent(title)
+    + "&priority=4&tags=coffee";
+  return UrlFetchApp.fetch(url, {
+    method: "post",
+    contentType: "text/plain; charset=utf-8",
+    payload: message,
+    muteHttpExceptions: true
+  });
+}
+
 /**
  * ★ ntfy 연결 테스트 (에디터에서 직접 실행용)
  * 1. 상단 함수 선택에서 testNtfy 선택 → [실행] 클릭
@@ -205,17 +210,9 @@ function json_(o) {
  * 3. 휴대폰에 알림이 오면 성공! (실행 로그에 응답 코드 200 표시)
  */
 function testNtfy() {
-  var res = UrlFetchApp.fetch("https://ntfy.sh", {
-    method: "post",
-    contentType: "application/json",
-    payload: JSON.stringify({
-      topic: "coffeechat-doonghwi",
-      title: "✅ Apps Script → ntfy 연결 성공!",
-      message: "이제 커피챗 신청이 들어오면 이 채널로 알림이 옵니다.",
-      priority: 4,
-      tags: ["tada"]
-    }),
-    muteHttpExceptions: true
-  });
+  var res = sendNtfy_(
+    "✅ Apps Script → ntfy 연결 성공!",
+    "이제 커피챗 신청이 들어오면 이 채널로 알림이 옵니다."
+  );
   Logger.log(res.getResponseCode() + " " + res.getContentText());
 }
