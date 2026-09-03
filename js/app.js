@@ -274,6 +274,7 @@ function renderStep4() {
   } else if (state.method === "운동") {
     el.innerHTML = `
       <p class="step-title">🏸 어떤 운동을 할까요?</p>
+      <p class="hint">🚴 새벽에 자전거 타고 나가는 것도 추천해요!</p>
       <div class="sport-grid">
         ${SPORTS.map((s) => `<button class="sport-card" data-sport="${s.name}"><span class="s-emoji">${s.emoji}</span>${s.name}</button>`).join("")}
         <button class="sport-card" data-sport="__custom"><span class="s-emoji">✏️</span>직접 제안</button>
@@ -302,9 +303,9 @@ function renderStep4() {
   } else {
     el.innerHTML = `
       <p class="step-title">✨ 자유롭게 제안해주세요!</p>
-      <p class="hint">보드게임, 산책, 전시… 뭐든 환영이에요.</p>
+      <p class="hint">독서 📖, 노래방 🎤, 보드게임, 산책, 전시… 뭐든 환영이에요.</p>
       <div class="custom-wrap">
-        <input type="text" id="customInput" placeholder="예: 보드게임 카페 가요!" maxlength="60">
+        <input type="text" id="customInput" placeholder="예: 같이 독서해요! / 노래방 가요!" maxlength="60">
       </div>
       ${navRowHTML()}`;
     state.subType = "custom";
