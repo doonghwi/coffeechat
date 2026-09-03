@@ -164,10 +164,10 @@ function renderSlots() {
     return `<button class="slot-chip ${state.slot === s.key ? "selected" : ""}" data-slot="${s.key}" ${free ? "" : "disabled"}>
       ${s.key}<small>${s.label}</small></button>`;
   }).join("");
-  $$(".slot-chip:not(:disabled)").forEach((btn) => {
+  $$("#slotGrid .slot-chip:not(:disabled)").forEach((btn) => {
     btn.addEventListener("click", () => {
       state.slot = btn.dataset.slot;
-      $$(".slot-chip").forEach((b) => b.classList.toggle("selected", b.dataset.slot === state.slot));
+      $$("#slotGrid .slot-chip").forEach((b) => b.classList.toggle("selected", b.dataset.slot === state.slot));
       showTimeInput();
       updateNext2();
     });
@@ -175,30 +175,35 @@ function renderSlots() {
   $("#timeInputWrap").classList.add("hidden");
 }
 
+const timeSel = { h: null, m: 0 };
+
 function showTimeInput() {
   const s = slotByKey(state.slot);
   $("#timeInputWrap").classList.remove("hidden");
-  const inp = $("#exactTime");
+  $("#timeRangeHint").textContent = `${s.key} 시간대(${s.label}) 안에서 골라주세요`;
+  timeSel.h = null; timeSel.m = 0;
+  state.time = null;
   const pad = (n) => String(n).padStart(2, "0");
-  inp.min = `${pad(s.from)}:00`;
-  inp.max = s.to === 24 ? "23:59" : `${pad(s.to - 1)}:59`;
-  inp.value = `${pad(s.from)}:00`;
-  state.time = inp.value;
-  $("#timeRangeHint").textContent = `${s.key} 시간대(${s.label}) 안에서 10분 단위로 정해주세요`;
-  inp.onchange = () => {
-    let [h, m] = inp.value.split(":").map(Number);
-    m = Math.round(m / 10) * 10; // 10분 단위로 맞춤
-    if (m === 60) { h += 1; m = 0; }
-    const okRange = s.to === 24 ? (h >= s.from && h <= 23) : (h >= s.from && h < s.to);
-    if (!okRange) {
-      inp.value = `${pad(s.from)}:00`;
-      $("#timeRangeHint").textContent = `⚠️ ${s.label} 사이로만 정할 수 있어요!`;
-    } else {
-      inp.value = `${pad(h)}:${pad(m)}`;
-    }
-    state.time = inp.value;
+  const hours = [];
+  for (let h = s.from; h < s.to; h++) hours.push(h);
+  $("#hourGrid").innerHTML = hours.map((h) =>
+    `<button type="button" class="slot-chip hour-chip" data-h="${h}">${h}시</button>`).join("");
+  $("#minGrid").innerHTML = [0, 10, 20, 30, 40, 50].map((m) =>
+    `<button type="button" class="slot-chip min-chip ${m === 0 ? "selected" : ""}" data-m="${m}">${pad(m)}분</button>`).join("");
+  const apply = () => {
+    state.time = timeSel.h === null ? null : `${pad(timeSel.h)}:${pad(timeSel.m)}`;
     updateNext2();
   };
+  $$("#hourGrid .hour-chip").forEach((btn) => btn.addEventListener("click", () => {
+    timeSel.h = Number(btn.dataset.h);
+    $$("#hourGrid .hour-chip").forEach((b) => b.classList.toggle("selected", Number(b.dataset.h) === timeSel.h));
+    apply();
+  }));
+  $$("#minGrid .min-chip").forEach((btn) => btn.addEventListener("click", () => {
+    timeSel.m = Number(btn.dataset.m);
+    $$("#minGrid .min-chip").forEach((b) => b.classList.toggle("selected", Number(b.dataset.m) === timeSel.m));
+    apply();
+  }));
 }
 
 function validStep2() { return state.date && state.slot && state.time; }
@@ -347,6 +352,7 @@ function pickerHTML(mode) {
     <div id="mapBox" class="hidden"></div>
     <div class="place-list" id="placeList"></div>
     <button class="etc-toggle" id="etcToggle">✏️ 리스트에 없어요! 제가 추천할게요 (etc)</button>
+    <button class="etc-toggle" id="skipToggle">🤷 아직 못 정했어요 — 만나서 정할게요 (스킵)</button>
     <div class="custom-wrap hidden" id="customWrap">
       <input type="text" id="customInput" placeholder="${isCafe ? "추천하고 싶은 카페를 알려주세요!" : "추천하고 싶은 맛집을 알려주세요!"}" maxlength="60">
     </div>
@@ -377,6 +383,15 @@ function initPicker(mode) {
   $("#vwList").addEventListener("click", () => setPickerView("list"));
   $("#vwMap").addEventListener("click", () => setPickerView("map"));
 
+  $("#skipToggle").addEventListener("click", () => {
+    state.subType = "skip"; state.subLabel = "미정 (만나서 결정)"; state.placeSid = null;
+    $("#customWrap").classList.add("hidden");
+    $$("#step4 .place-item").forEach((x) => x.classList.remove("selected"));
+    const banner = $("#selectedBanner");
+    banner.classList.remove("hidden");
+    banner.innerHTML = `✔ 장소는 <b>만나서 정하기</b>로 했어요 — 아래 <b>다음</b> 버튼을 눌러주세요!`;
+    updateNext4();
+  });
   $("#etcToggle").addEventListener("click", () => {
     $("#customWrap").classList.toggle("hidden");
     if (!$("#customWrap").classList.contains("hidden")) {
