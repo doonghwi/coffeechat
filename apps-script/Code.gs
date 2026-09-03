@@ -4,9 +4,10 @@
  * 하는 일
  *  - GET  ?action=busy : 날짜별로 이미 찬 시간대 반환 (예약 + 내 구글 캘린더 참/빔)
  *                        → 캘린더 "내용"은 절대 내보내지 않고 참/빔 여부만 계산합니다.
- *  - POST {name, method, location, date, slot, time}
+ *  - POST {name, method, location, date, slot, time, message}
  *         : 슬롯 검증 → 스프레드시트에 기록 → 내 캘린더에
  *           "@@시 [이름] [위치] 커피챗" 이벤트 생성
+ *           → ntfy.sh/coffeechat-doonghwi 로 푸시 알림 (신청 메시지 포함)
  *
  * 배포: 우측 상단 [배포] > 새 배포 > 유형: 웹 앱
  *   - 실행 계정: 나(Me)
@@ -41,9 +42,9 @@ var BLOCKED = {
   7:  ["저녁", "밤"],
   8:  ["점저", "저녁"],
   10: ["저녁", "밤"],
+  11: ["저녁", "밤", "새벽"],
   13: "all",
   14: ["저녁", "밤"],
-  15: ["저녁", "밤", "새벽"],
   16: ["저녁", "밤", "새벽"],
   17: ["저녁", "밤"],
   18: "all",
@@ -61,7 +62,7 @@ function getSheet_() {
   if (!id) {
     ss = SpreadsheetApp.create("커피챗 예약");
     props.setProperty("SHEET_ID", ss.getId());
-    ss.getSheets()[0].appendRow(["신청시각", "이름", "날짜(일)", "시간대", "시간", "방법", "장소", "직접추천여부"]);
+    ss.getSheets()[0].appendRow(["신청시각", "이름", "날짜(일)", "시간대", "시간", "방법", "장소", "직접추천여부", "메시지"]);
   } else {
     ss = SpreadsheetApp.openById(id);
   }
@@ -130,6 +131,7 @@ function doPost(e) {
     var day = parseInt(b.date, 10);
     var slot = String(b.slot || "");
     var time = String(b.time || "");
+    var message = String(b.message || "").trim().substring(0, 500);
 
     if (!name || !location || !day || !SLOTS[slot] || !/^\d{2}:\d{2}$/.test(time)) {
       return json_({ ok: false, error: "invalid_input" });
@@ -149,7 +151,7 @@ function doPost(e) {
     }
 
     // 시트 기록
-    getSheet_().appendRow([new Date(), name, day, slot, time, method, location, b.isCustom ? "O" : ""]);
+    getSheet_().appendRow([new Date(), name, day, slot, time, method, location, b.isCustom ? "O" : "", message]);
 
     // 캘린더 이벤트: "@@시 [이름] [위치] 커피챗" (2시간)
     var timeLabel = hh + "시" + (mm > 0 ? mm + "분" : "");
@@ -158,7 +160,26 @@ function doPost(e) {
     var endAt = new Date(startAt.getTime() + 2 * 60 * 60 * 1000);
     CalendarApp.getDefaultCalendar().createEvent(title, startAt, endAt, {
       description: "커피챗 신청 (" + method + " / " + location + (b.isCustom ? " - 신청자 추천" : "") + ")"
+        + (message ? "\n\n💬 신청 메시지:\n" + message : "")
     });
+
+    // ntfy 푸시 알림 (실패해도 예약은 성공 처리)
+    try {
+      UrlFetchApp.fetch("https://ntfy.sh", {
+        method: "post",
+        contentType: "application/json",
+        payload: JSON.stringify({
+          topic: "coffeechat-doonghwi",
+          title: "☕ 커피챗 신청: " + name,
+          message: "9월 " + day + "일 " + time + " · " + method + " · " + location
+            + (b.isCustom ? " (신청자 추천)" : "")
+            + (message ? "\n\n💬 " + message : ""),
+          priority: 4,
+          tags: ["coffee"]
+        }),
+        muteHttpExceptions: true
+      });
+    } catch (ntfyErr) { /* 알림 실패는 무시 */ }
 
     return json_({ ok: true });
   } catch (err) {

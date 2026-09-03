@@ -1,17 +1,20 @@
 // ===== 커피챗 신청 앱 =====
+// 흐름: 1 이름 → 2 언제(날짜/시간대/시각) → 3 방법 → 4 어디서 → 5 메시지+제출
 "use strict";
 
 const state = {
+  name: null,
+  date: null,        // 일(day number)
+  slot: null,        // 시간대 key
+  time: null,        // "HH:MM"
   method: null,      // 식사 | 커피 | 운동 | 기타
   subType: null,     // place | custom | sport
   subLabel: null,    // 장소/종목/자유 텍스트
   placeSid: null,
-  date: null,        // 일(day number)
-  slot: null,        // 시간대 key
-  time: null,        // "HH:MM"
+  message: "",
 };
 
-let busyMap = {};        // { "5": ["점심", ...] } 서버(예약+캘린더)에서 받은 찬 시간
+let busyMap = {};        // { "5": ["점심", ...] } 서버(캘린더)에서 받은 찬 시간
 let busyLoaded = false;
 
 // ---------- 유틸 ----------
@@ -19,74 +22,6 @@ const $ = (sel) => document.querySelector(sel);
 const $$ = (sel) => document.querySelectorAll(sel);
 
 function slotByKey(key) { return SLOTS.find((s) => s.key === key); }
-
-// ---------- 영업시간 판단 ----------
-const DOW_KO = ["일", "월", "화", "수", "목", "금", "토"];
-function toMin(t) { const [h, m] = t.split(":").map(Number); return h * 60 + m; }
-
-function hoursForDay(p, day) {
-  if (!p.h || !p.h.length) return null; // 데이터 없음
-  const dow = DOW_KO[new Date(YEAR, MONTH - 1, day).getDay()];
-  const match = p.h.filter((h) => {
-    const d = h.d || "";
-    if (d.includes("매일") || d.includes(dow)) return true;
-    if (d.includes("~")) { // 예: "월~금"
-      const parts = d.split("~");
-      const ai = DOW_KO.indexOf(parts[0].trim().charAt(0));
-      const bi = DOW_KO.indexOf(parts[1].trim().charAt(0));
-      const di = DOW_KO.indexOf(dow);
-      if (ai >= 0 && bi >= 0) return ai <= bi ? (di >= ai && di <= bi) : (di >= ai || di <= bi);
-    }
-    return false;
-  });
-  return match;
-}
-
-// true=영업중 / false=영업 아님(가능성) / null=정보 없음
-function isOpenAt(p, day, time) {
-  const hs = hoursForDay(p, day);
-  if (hs === null) return null;
-  if (!hs.length) return false; // 그 요일 영업 정보 없음 → 휴무 가능성
-  const t = toMin(time);
-  for (const h of hs) {
-    let s = toMin(h.s), e = toMin(h.e);
-    if (e <= s) e += 1440; // 자정 넘김
-    const inMain = (t >= s && t < e) || (t + 1440 >= s && t + 1440 < e);
-    if (inMain) {
-      const inBreak = (h.b || []).some((br) => br[0] && t >= toMin(br[0]) && t < toMin(br[1]));
-      if (!inBreak) return true;
-    }
-  }
-  return false;
-}
-
-function checkOpenWarning() {
-  const el = $("#openWarn");
-  if (!el) return;
-  el.textContent = "";
-  if (state.subType !== "place" || !state.placeSid || !state.date || !state.time) return;
-  const p = PLACES.find((x) => x.sid === state.placeSid);
-  if (!p) return;
-  const open = isOpenAt(p, state.date, state.time);
-  if (open === false) {
-    el.innerHTML = `⚠️ 이 시간엔 <b>「${p.n}」</b>이(가) 영업하지 않을 수 있어요! 다른 시간이나 장소도 고려해주세요.`;
-    el.style.color = "#c0564a";
-  } else if (open === true) {
-    el.innerHTML = `✅ 이 시간에 <b>「${p.n}」</b> 영업 중이에요 (네이버 정보 기준)`;
-    el.style.color = "#5c8a58";
-  }
-}
-
-function menuLine(p, n) {
-  if (!p.m || !p.m.length) return "";
-  return p.m.slice(0, n).map((x) => x[0]).join(" · ");
-}
-
-function hoursLine(p) {
-  if (!p.h || !p.h.length) return "";
-  const h = p.h[0];
-  return `${h.d} ${h.s}~${h.e}${p.h.length > 1 ? " 외" : ""}`;
-}
 
 function isSlotFree(day, slotKey) {
   const blocked = BLOCKED[day];
@@ -108,41 +43,200 @@ function isPastDay(day) {
   return d < t0;
 }
 
+// ---------- 영업시간 판단 ----------
+const DOW_KO = ["일", "월", "화", "수", "목", "금", "토"];
+function toMin(t) { const [h, m] = t.split(":").map(Number); return h * 60 + m; }
+
+function hoursForDay(p, day) {
+  if (!p.h || !p.h.length) return null; // 데이터 없음
+  const dow = DOW_KO[new Date(YEAR, MONTH - 1, day).getDay()];
+  return p.h.filter((h) => {
+    const d = h.d || "";
+    if (d.includes("매일") || d.includes(dow)) return true;
+    if (d.includes("~")) { // 예: "월~금"
+      const parts = d.split("~");
+      const ai = DOW_KO.indexOf(parts[0].trim().charAt(0));
+      const bi = DOW_KO.indexOf(parts[1].trim().charAt(0));
+      const di = DOW_KO.indexOf(dow);
+      if (ai >= 0 && bi >= 0) return ai <= bi ? (di >= ai && di <= bi) : (di >= ai || di <= bi);
+    }
+    return false;
+  });
+}
+
+// true=영업중 / false=영업 아님(가능성) / null=정보 없음
+function isOpenAt(p, day, time) {
+  const hs = hoursForDay(p, day);
+  if (hs === null) return null;
+  if (!hs.length) return false; // 그 요일 영업 정보 없음 → 휴무 가능성
+  const t = toMin(time);
+  for (const h of hs) {
+    let s = toMin(h.s), e = toMin(h.e);
+    if (e <= s) e += 1440; // 자정 넘김
+    const inMain = (t >= s && t < e) || (t + 1440 >= s && t + 1440 < e);
+    if (inMain) {
+      const inBreak = (h.b || []).some((br) => br[0] && t >= toMin(br[0]) && t < toMin(br[1]));
+      if (!inBreak) return true;
+    }
+  }
+  return false;
+}
+
+function menuLine(p, n) {
+  if (!p.m || !p.m.length) return "";
+  return p.m.slice(0, n).map((x) => x[0]).join(" · ");
+}
+
+function hoursLine(p) {
+  if (!p.h || !p.h.length) return "";
+  const h = p.h[0];
+  return `${h.d} ${h.s}~${h.e}${p.h.length > 1 ? " 외" : ""}`;
+}
+
 // ---------- 스텝 이동 ----------
 function goStep(n) {
-  ["step1", "step2", "step3", "step4", "stepDone"].forEach((id) => $("#" + id).classList.add("hidden"));
+  ["step1", "step2", "step3", "step4", "step5", "stepDone"].forEach((id) => $("#" + id).classList.add("hidden"));
   $("#" + (n === "done" ? "stepDone" : "step" + n)).classList.remove("hidden");
   $$(".step-dot").forEach((dot) => {
     const s = Number(dot.dataset.step);
     dot.classList.toggle("active", s === n);
-    dot.classList.toggle("done", n !== "done" ? s < n : true);
+    dot.classList.toggle("done", n === "done" ? true : s < n);
   });
   $("#apply").scrollIntoView({ behavior: "smooth", block: "start" });
 }
 
-// ---------- STEP 1: 방법 ----------
+// ---------- STEP 1: 이름 ----------
+$("#applicantName").addEventListener("input", () => {
+  const ok = !!$("#applicantName").value.trim();
+  const btn = $("#toStep2");
+  btn.disabled = !ok;
+  btn.style.opacity = ok ? "1" : ".5";
+});
+$("#toStep2").addEventListener("click", () => {
+  state.name = $("#applicantName").value.trim();
+  if (!state.name) return;
+  renderCalendar();
+  goStep(2);
+});
+
+// ---------- STEP 2: 언제 ----------
+function renderCalendar() {
+  const cal = $("#calendar");
+  const firstDow = new Date(YEAR, MONTH - 1, 1).getDay(); // 0=일
+  const daysInMonth = new Date(YEAR, MONTH, 0).getDate();
+  const dows = ["일", "월", "화", "수", "목", "금", "토"];
+  let html = `<div class="cal-header">${YEAR}년 ${MONTH}월</div><div class="cal-grid">`;
+  html += dows.map((d) => `<div class="cal-dow">${d}</div>`).join("");
+  for (let i = 0; i < firstDow; i++) html += `<div class="cal-empty"></div>`;
+  for (let day = 1; day <= daysInMonth; day++) {
+    const free = freeSlotCount(day);
+    const disabled = isPastDay(day) || free === 0;
+    const dots = "●".repeat(Math.min(free, 4));
+    html += `<button class="cal-day ${state.date === day ? "selected" : ""}" data-day="${day}" ${disabled ? "disabled" : ""}>
+      ${day}${disabled ? "" : `<span class="avail-dots">${dots}</span>`}</button>`;
+  }
+  html += `</div>`;
+  cal.innerHTML = html;
+  $$(".cal-day:not(:disabled)").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      state.date = Number(btn.dataset.day);
+      state.slot = null; state.time = null;
+      $$(".cal-day").forEach((b) => b.classList.toggle("selected", Number(b.dataset.day) === state.date));
+      renderSlots();
+      updateNext2();
+    });
+  });
+  $("#slotPicker").classList.add("hidden");
+  updateNext2();
+  if (!busyLoaded && CONFIG.API_URL) {
+    const hint = document.createElement("p");
+    hint.className = "hint"; hint.id = "busyLoadingHint";
+    hint.textContent = "⏳ 예약 현황을 불러오는 중…";
+    cal.appendChild(hint);
+  }
+}
+
+function renderSlots() {
+  $("#slotPicker").classList.remove("hidden");
+  $("#slotDateLabel").textContent = `9월 ${state.date}일, 시간대를 골라주세요`;
+  $("#slotGrid").innerHTML = SLOTS.map((s) => {
+    const free = isSlotFree(state.date, s.key);
+    return `<button class="slot-chip ${state.slot === s.key ? "selected" : ""}" data-slot="${s.key}" ${free ? "" : "disabled"}>
+      ${s.key}<small>${s.label}</small></button>`;
+  }).join("");
+  $$(".slot-chip:not(:disabled)").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      state.slot = btn.dataset.slot;
+      $$(".slot-chip").forEach((b) => b.classList.toggle("selected", b.dataset.slot === state.slot));
+      showTimeInput();
+      updateNext2();
+    });
+  });
+  $("#timeInputWrap").classList.add("hidden");
+}
+
+function showTimeInput() {
+  const s = slotByKey(state.slot);
+  $("#timeInputWrap").classList.remove("hidden");
+  const inp = $("#exactTime");
+  const pad = (n) => String(n).padStart(2, "0");
+  inp.min = `${pad(s.from)}:00`;
+  inp.max = s.to === 24 ? "23:59" : `${pad(s.to - 1)}:59`;
+  inp.value = `${pad(s.from)}:00`;
+  state.time = inp.value;
+  $("#timeRangeHint").textContent = `${s.key} 시간대(${s.label}) 안에서 10분 단위로 정해주세요`;
+  inp.onchange = () => {
+    let [h, m] = inp.value.split(":").map(Number);
+    m = Math.round(m / 10) * 10; // 10분 단위로 맞춤
+    if (m === 60) { h += 1; m = 0; }
+    const okRange = s.to === 24 ? (h >= s.from && h <= 23) : (h >= s.from && h < s.to);
+    if (!okRange) {
+      inp.value = `${pad(s.from)}:00`;
+      $("#timeRangeHint").textContent = `⚠️ ${s.label} 사이로만 정할 수 있어요!`;
+    } else {
+      inp.value = `${pad(h)}:${pad(m)}`;
+    }
+    state.time = inp.value;
+    updateNext2();
+  };
+}
+
+function validStep2() { return state.date && state.slot && state.time; }
+function updateNext2() { $("#toStep3").classList.toggle("hidden", !validStep2()); }
+
+$("#step2 .btn-back").addEventListener("click", () => goStep(1));
+$("#toStep3").addEventListener("click", () => { if (validStep2()) goStep(3); });
+
+// ---------- STEP 3: 방법 ----------
 $$(".method-card").forEach((btn) => {
   btn.addEventListener("click", () => {
     state.method = btn.dataset.method;
     state.subType = null; state.subLabel = null; state.placeSid = null;
-    renderStep2();
-    goStep(2);
+    renderStep4();
+    goStep(4);
   });
 });
+$("#step3 .btn-back").addEventListener("click", () => goStep(2));
 
-// ---------- STEP 2: 하위 선택 ----------
-function renderStep2() {
-  const el = $("#step2");
+// ---------- STEP 4: 어디서 ----------
+function openFilterHint() {
+  return `<p class="hint">🕐 <b>9월 ${state.date}일 ${state.time}</b>에 영업하지 않는 곳은 자동으로 제외했어요. (영업시간 정보가 없는 곳은 보여드려요)</p>`;
+}
+
+function renderStep4() {
+  const el = $("#step4");
   if (state.method === "식사") {
     el.innerHTML = `
       <p class="step-title">🍚 어디서 먹을까요?</p>
       <p class="hint">제가 아끼는 맛집 리스트예요. ⭐찐맛집 · ✅검증된 맛집부터 골라보세요!</p>
+      ${openFilterHint()}
       ${pickerHTML("meal")}`;
     initPicker("meal");
   } else if (state.method === "커피") {
     el.innerHTML = `
       <p class="step-title">☕ 어느 카페로 갈까요?</p>
       <p class="hint">💡 사실 저는 카페를 잘 몰라요… 좋은 곳 아시면 <b>직접 추천</b>해주시면 더 좋아요!</p>
+      ${openFilterHint()}
       ${pickerHTML("cafe")}`;
     initPicker("cafe");
   } else if (state.method === "운동") {
@@ -156,9 +250,9 @@ function renderStep2() {
         <input type="text" id="customInput" placeholder="하고 싶은 운동을 알려주세요!" maxlength="40">
       </div>
       ${navRowHTML()}`;
-    $$("#step2 .sport-card").forEach((btn) => {
+    $$("#step4 .sport-card").forEach((btn) => {
       btn.addEventListener("click", () => {
-        $$("#step2 .sport-card").forEach((b) => b.classList.remove("selected"));
+        $$("#step4 .sport-card").forEach((b) => b.classList.remove("selected"));
         btn.classList.add("selected");
         if (btn.dataset.sport === "__custom") {
           $("#customWrap").classList.remove("hidden");
@@ -168,7 +262,7 @@ function renderStep2() {
           $("#customWrap").classList.add("hidden");
           state.subType = "sport"; state.subLabel = btn.dataset.sport;
         }
-        updateNext2();
+        updateNext4();
       });
     });
     bindCustomInput();
@@ -190,8 +284,8 @@ function renderStep2() {
 function navRowHTML() {
   return `
     <div class="nav-row">
-      <button class="btn-back" data-back="1">← 이전</button>
-      <button class="btn-next" id="toStep3" disabled style="opacity:.5">다음 →</button>
+      <button class="btn-back" data-back="3">← 이전</button>
+      <button class="btn-next" id="toStep5" disabled style="opacity:.5">다음 →</button>
     </div>`;
 }
 
@@ -200,23 +294,23 @@ function bindCustomInput() {
   if (!inp) return;
   inp.addEventListener("input", () => {
     if (state.subType === "custom") state.subLabel = inp.value.trim();
-    updateNext2();
+    updateNext4();
   });
 }
 
 function bindNavRow() {
-  const back = $("#step2 .btn-back");
-  if (back) back.addEventListener("click", () => goStep(Number(back.dataset.back)));
-  const next = $("#toStep3");
+  const back = $("#step4 .btn-back");
+  if (back) back.addEventListener("click", () => goStep(3));
+  const next = $("#toStep5");
   if (next) next.addEventListener("click", () => {
     if (!state.subLabel) return;
-    renderCalendar();
-    goStep(3);
+    renderStep5();
+    goStep(5);
   });
 }
 
-function updateNext2() {
-  const next = $("#toStep3");
+function updateNext4() {
+  const next = $("#toStep5");
   if (!next) return;
   const ok = !!state.subLabel;
   next.disabled = !ok;
@@ -264,14 +358,14 @@ function initPicker(mode) {
   pickerCtx.region = "전체"; pickerCtx.q = ""; pickerCtx.view = "map";
   pickerCtx.map = null; pickerCtx.markers = [];
 
-  $$("#step2 .tier-chip").forEach((c) => c.addEventListener("click", () => {
-    $$("#step2 .tier-chip").forEach((x) => x.classList.remove("on"));
+  $$("#step4 .tier-chip").forEach((c) => c.addEventListener("click", () => {
+    $$("#step4 .tier-chip").forEach((x) => x.classList.remove("on"));
     c.classList.add("on");
     pickerCtx.tier = Number(c.dataset.tier);
     refreshPicker();
   }));
-  $$("#step2 .cat-chip").forEach((c) => c.addEventListener("click", () => {
-    $$("#step2 .cat-chip").forEach((x) => x.classList.remove("on"));
+  $$("#step4 .cat-chip").forEach((c) => c.addEventListener("click", () => {
+    $$("#step4 .cat-chip").forEach((x) => x.classList.remove("on"));
     c.classList.add("on");
     pickerCtx.cat = c.dataset.cat;
     refreshPicker();
@@ -286,9 +380,9 @@ function initPicker(mode) {
     $("#customWrap").classList.toggle("hidden");
     if (!$("#customWrap").classList.contains("hidden")) {
       state.subType = "custom"; state.subLabel = $("#customInput").value.trim(); state.placeSid = null;
-      $$("#step2 .place-item").forEach((x) => x.classList.remove("selected"));
+      $$("#step4 .place-item").forEach((x) => x.classList.remove("selected"));
       $("#customInput").focus();
-      updateNext2();
+      updateNext4();
     }
   });
   bindCustomInput();
@@ -305,6 +399,8 @@ function filteredPlaces() {
     if (!isCafe && pickerCtx.cat !== "전체" && p.c !== pickerCtx.cat) return false;
     if (pickerCtx.region !== "전체" && p.r !== pickerCtx.region) return false;
     if (pickerCtx.q && !(p.n.includes(pickerCtx.q) || p.a.includes(pickerCtx.q))) return false;
+    // 선택한 날짜·시각에 영업하지 않는 곳 제외 (정보 없는 곳은 유지)
+    if (state.date && state.time && isOpenAt(p, state.date, state.time) === false) return false;
     return true;
   });
   // 관악구 → 서울 → 그 외 순으로, 같은 지역에선 찐맛집/검증된 우선
@@ -321,7 +417,7 @@ function tierBadge(p) {
 
 function refreshPicker() {
   const list = filteredPlaces();
-  $("#countLabel").textContent = `${list.length}곳`;
+  $("#countLabel").textContent = `${list.length}곳 (선택 시각 영업 기준)`;
   const box = $("#placeList");
   box.innerHTML = list.map((p) => `
     <button class="place-item ${state.placeSid === p.sid ? "selected" : ""}" data-sid="${p.sid}">
@@ -331,8 +427,8 @@ function refreshPicker() {
         ${menuLine(p, 2) ? `<div class="pi-menu">🍽 ${menuLine(p, 2)}</div>` : ""}
       </div>
       <a class="pi-link" href="https://map.naver.com/p/entry/place/${p.sid}" target="_blank" rel="noopener" onclick="event.stopPropagation()">네이버 ↗</a>
-    </button>`).join("") || `<p class="hint">조건에 맞는 곳이 없어요 😢</p>`;
-  $$("#step2 .place-item").forEach((item) => {
+    </button>`).join("") || `<p class="hint">조건에 맞는 곳이 없어요 😢 필터를 바꾸거나 직접 추천해주세요!</p>`;
+  $$("#step4 .place-item").forEach((item) => {
     item.addEventListener("click", () => selectPlace(item.dataset.sid));
   });
   if (pickerCtx.view === "map") renderMarkers(list);
@@ -343,8 +439,8 @@ function selectPlace(sid) {
   if (!p) return;
   state.subType = "place"; state.subLabel = p.n; state.placeSid = sid;
   $("#customWrap").classList.add("hidden");
-  $$("#step2 .place-item").forEach((x) => x.classList.toggle("selected", x.dataset.sid === sid));
-  updateNext2();
+  $$("#step4 .place-item").forEach((x) => x.classList.toggle("selected", x.dataset.sid === sid));
+  updateNext4();
 }
 window.__selectPlace = selectPlace; // 지도 인포윈도우에서 사용
 
@@ -361,7 +457,7 @@ function setPickerView(view) {
 let naverLoading = false;
 function ensureMap() {
   if (!CONFIG.NAVER_CLIENT_ID) {
-    $("#mapBox").innerHTML = `<div class="map-notice">🗺️ 지도는 준비 중이에요!<br>아래 리스트에서 골라주세요 🙏</div>`;
+    $("#mapBox").innerHTML = `<div class="map-notice">🗺️ 지도는 준비 중이에요!<br>리스트에서 골라주세요 🙏</div>`;
     $("#mapBox").style.height = "auto";
     return;
   }
@@ -381,8 +477,12 @@ function buildMap() {
     zoom: 13,
   });
   pickerCtx.infoWin = new naver.maps.InfoWindow({ content: "", borderWidth: 0, backgroundColor: "transparent", disableAnchor: true });
+  // 지도 빈 곳을 클릭해도 인포윈도우 닫힘
+  naver.maps.Event.addListener(pickerCtx.map, "click", () => pickerCtx.infoWin && pickerCtx.infoWin.close());
   renderMarkers(filteredPlaces());
 }
+
+window.__closeInfo = () => { if (pickerCtx.infoWin) pickerCtx.infoWin.close(); };
 
 function markerColor(t) { return t === 3 ? "#e8a020" : t === 2 ? "#5c8a58" : "#8b5e34"; }
 
@@ -402,7 +502,8 @@ function renderMarkers(list) {
     });
     naver.maps.Event.addListener(marker, "click", () => {
       pickerCtx.infoWin.setContent(`
-        <div style="background:#fff;border-radius:12px;box-shadow:0 4px 14px rgba(0,0,0,.25);padding:12px 14px;font-family:Pretendard,sans-serif;max-width:230px">
+        <div style="position:relative;background:#fff;border-radius:12px;box-shadow:0 4px 14px rgba(0,0,0,.25);padding:12px 30px 12px 14px;font-family:Pretendard,sans-serif;max-width:230px">
+          <button onclick="__closeInfo()" style="position:absolute;top:6px;right:6px;width:22px;height:22px;border:none;background:#f3e2cd;color:#8b5e34;border-radius:50%;font-size:12px;font-weight:700;cursor:pointer;line-height:1">✕</button>
           <b style="font-size:15px">${p.n}</b> ${p.t === 3 ? "⭐" : p.t === 2 ? "✅" : ""}
           <div style="font-size:12px;color:#8a7060;margin:4px 0">${p.c} · ${p.a}</div>
           ${menuLine(p, 3) ? `<div style="font-size:12px;color:#3b2a1f;margin:2px 0">🍽 ${menuLine(p, 3)}</div>` : ""}
@@ -418,127 +519,26 @@ function renderMarkers(list) {
   });
 }
 
-// ---------- STEP 3: 달력 ----------
-function renderCalendar() {
-  const cal = $("#calendar");
-  const firstDow = new Date(YEAR, MONTH - 1, 1).getDay(); // 0=일
-  const daysInMonth = new Date(YEAR, MONTH, 0).getDate();
-  const dows = ["일", "월", "화", "수", "목", "금", "토"];
-  let html = `<div class="cal-header">${YEAR}년 ${MONTH}월</div><div class="cal-grid">`;
-  html += dows.map((d) => `<div class="cal-dow">${d}</div>`).join("");
-  for (let i = 0; i < firstDow; i++) html += `<div class="cal-empty"></div>`;
-  for (let day = 1; day <= daysInMonth; day++) {
-    const free = freeSlotCount(day);
-    const disabled = isPastDay(day) || free === 0;
-    const dots = "●".repeat(Math.min(free, 4));
-    html += `<button class="cal-day ${state.date === day ? "selected" : ""}" data-day="${day}" ${disabled ? "disabled" : ""}>
-      ${day}${disabled ? "" : `<span class="avail-dots">${dots}</span>`}</button>`;
-  }
-  html += `</div>`;
-  cal.innerHTML = html;
-  $$(".cal-day:not(:disabled)").forEach((btn) => {
-    btn.addEventListener("click", () => {
-      state.date = Number(btn.dataset.day);
-      state.slot = null; state.time = null;
-      $$(".cal-day").forEach((b) => b.classList.toggle("selected", Number(b.dataset.day) === state.date));
-      renderSlots();
-      updateNext3();
-    });
-  });
-  $("#step3 .btn-back").onclick = () => goStep(2);
-  $("#toStep4").onclick = () => {
-    if (!validStep3()) return;
-    renderSummary();
-    goStep(4);
-  };
-  $("#slotPicker").classList.add("hidden");
-  if (!busyLoaded && CONFIG.API_URL) {
-    const hint = document.createElement("p");
-    hint.className = "hint"; hint.id = "busyLoadingHint";
-    hint.textContent = "⏳ 예약 현황을 불러오는 중…";
-    cal.appendChild(hint);
-  }
-}
-
-function renderSlots() {
-  $("#slotPicker").classList.remove("hidden");
-  $("#slotDateLabel").textContent = `9월 ${state.date}일, 시간대를 골라주세요`;
-  $("#slotGrid").innerHTML = SLOTS.map((s) => {
-    const free = isSlotFree(state.date, s.key);
-    return `<button class="slot-chip ${state.slot === s.key ? "selected" : ""}" data-slot="${s.key}" ${free ? "" : "disabled"}>
-      ${s.key}<small>${s.label}</small></button>`;
-  }).join("");
-  $$(".slot-chip:not(:disabled)").forEach((btn) => {
-    btn.addEventListener("click", () => {
-      state.slot = btn.dataset.slot;
-      $$(".slot-chip").forEach((b) => b.classList.toggle("selected", b.dataset.slot === state.slot));
-      showTimeInput();
-      updateNext3();
-    });
-  });
-  $("#timeInputWrap").classList.add("hidden");
-}
-
-function showTimeInput() {
-  const s = slotByKey(state.slot);
-  const wrap = $("#timeInputWrap");
-  wrap.classList.remove("hidden");
-  const inp = $("#exactTime");
-  const pad = (n) => String(n).padStart(2, "0");
-  inp.min = `${pad(s.from)}:00`;
-  inp.max = s.to === 24 ? "23:59" : `${pad(s.to - 1)}:59`;
-  inp.value = `${pad(s.from)}:00`;
-  state.time = inp.value;
-  $("#timeRangeHint").textContent = `${s.key} 시간대(${s.label}) 안에서 10분 단위로 정해주세요`;
-  inp.onchange = () => {
-    let [h, m] = inp.value.split(":").map(Number);
-    m = Math.round(m / 10) * 10; // 10분 단위로 맞춤
-    if (m === 60) { h += 1; m = 0; }
-    const okRange = s.to === 24 ? (h >= s.from && h <= 23) : (h >= s.from && h < s.to);
-    if (!okRange) {
-      inp.value = `${pad(s.from)}:00`;
-      $("#timeRangeHint").textContent = `⚠️ ${s.label} 사이로만 정할 수 있어요!`;
-    } else {
-      inp.value = `${pad(h)}:${pad(m)}`;
-    }
-    state.time = inp.value;
-    checkOpenWarning();
-    updateNext3();
-  };
-  checkOpenWarning();
-}
-
-function validStep3() { return state.date && state.slot && state.time; }
-function updateNext3() {
-  $("#toStep4").classList.toggle("hidden", !validStep3());
-}
-
-// ---------- STEP 4 ----------
-function locationLabel() {
-  if (state.method === "운동") return state.subLabel;
-  return state.subLabel;
-}
-
-function methodLine() {
-  const emo = { 식사: "🍚", 커피: "☕", 운동: "🏸", 기타: "✨" };
-  return `${emo[state.method]} ${state.method}`;
-}
-
-function renderSummary() {
+// ---------- STEP 5: 메시지 + 확인 ----------
+function renderStep5() {
   $("#summary").innerHTML = `
-    <div><b>방법</b> ${methodLine()}</div>
-    <div><b>${state.method === "운동" ? "종목" : "장소"}</b> ${state.subLabel}${state.subType === "custom" ? " (직접 추천)" : ""}</div>
-    <div><b>날짜</b> 9월 ${state.date}일</div>
-    <div><b>시간</b> ${state.slot} · ${state.time}</div>`;
-  $("#step4 .btn-back").onclick = () => goStep(3);
+    <div><b>이름</b> ${state.name}</div>
+    <div><b>날짜</b> 9월 ${state.date}일 (${DOW_KO[new Date(YEAR, MONTH - 1, state.date).getDay()]})</div>
+    <div><b>시간</b> ${state.slot} · ${state.time}</div>
+    <div><b>방법</b> ${({ 식사: "🍚", 커피: "☕", 운동: "🏸", 기타: "✨" })[state.method]} ${state.method}</div>
+    <div><b>${state.method === "운동" ? "종목" : "장소"}</b> ${state.subLabel}${state.subType === "custom" ? " (직접 추천)" : ""}</div>`;
+  $("#step5 .btn-back").onclick = () => goStep(4);
 }
+
+$("#messageInput").addEventListener("input", () => {
+  state.message = $("#messageInput").value.trim();
+});
 
 $("#submitBtn").addEventListener("click", async () => {
-  const name = $("#applicantName").value.trim();
   const status = $("#submitStatus");
-  if (!name) { status.textContent = "⚠️ 이름을 입력해주세요!"; return; }
-  if (!validStep3()) { status.textContent = "⚠️ 날짜/시간을 다시 확인해주세요."; goStep(3); return; }
-  state.name = name;
+  if (!state.name) { status.textContent = "⚠️ 이름을 다시 확인해주세요."; goStep(1); return; }
+  if (!validStep2()) { status.textContent = "⚠️ 날짜/시간을 다시 확인해주세요."; goStep(2); return; }
+  if (!state.subLabel) { status.textContent = "⚠️ 장소를 다시 확인해주세요."; goStep(4); return; }
 
   if (!CONFIG.API_URL) {
     status.textContent = "⚠️ 예약 시스템이 아직 연결 준비 중이에요. 잠시 후 다시 시도해주세요!";
@@ -554,11 +554,12 @@ $("#submitBtn").addEventListener("click", async () => {
       body: JSON.stringify({
         name: state.name,
         method: state.method,
-        location: locationLabel(),
+        location: state.subLabel,
         isCustom: state.subType === "custom",
         date: state.date,
         slot: state.slot,
         time: state.time,
+        message: state.message,
       }),
     });
     const out = await res.json();
@@ -569,7 +570,7 @@ $("#submitBtn").addEventListener("click", async () => {
       status.textContent = "😢 아쉽게도 방금 다른 분이 그 시간을 선택했어요. 다른 시간을 골라주세요!";
       await loadBusy();
       renderCalendar();
-      goStep(3);
+      goStep(2);
     } else {
       status.textContent = "⚠️ 오류가 발생했어요: " + (out.error || "알 수 없는 오류");
     }
@@ -594,7 +595,7 @@ async function loadBusy() {
   const hint = $("#busyLoadingHint");
   if (hint) hint.remove();
   // 달력이 열려 있으면 갱신
-  if (!$("#step3").classList.contains("hidden")) renderCalendar();
+  if (!$("#step2").classList.contains("hidden")) renderCalendar();
 }
 
 loadBusy();

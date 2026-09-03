@@ -50,31 +50,29 @@
   <section class="card" id="apply">
     <h2>☕ 커피챗 신청</h2>
     <div class="steps-bar" id="stepsBar">
-      <div class="step-dot active" data-step="1"><span>1</span>방법</div>
+      <div class="step-dot active" data-step="1"><span>1</span>이름</div>
       <div class="step-line"></div>
-      <div class="step-dot" data-step="2"><span>2</span>어디서</div>
+      <div class="step-dot" data-step="2"><span>2</span>언제</div>
       <div class="step-line"></div>
-      <div class="step-dot" data-step="3"><span>3</span>언제</div>
+      <div class="step-dot" data-step="3"><span>3</span>방법</div>
       <div class="step-line"></div>
-      <div class="step-dot" data-step="4"><span>4</span>이름</div>
+      <div class="step-dot" data-step="4"><span>4</span>어디서</div>
+      <div class="step-line"></div>
+      <div class="step-dot" data-step="5"><span>5</span>메시지</div>
     </div>
 
-    <!-- STEP 1: 방법 -->
+    <!-- STEP 1: 이름 -->
     <div class="step-panel" id="step1">
-      <p class="step-title">어떤 방식으로 만날까요?</p>
-      <div class="method-grid">
-        <button class="method-card" data-method="식사"><span class="m-emoji">🍚</span><span class="m-name">식사</span><span class="m-desc">추천 맛집에서 밥 한 끼</span></button>
-        <button class="method-card" data-method="커피"><span class="m-emoji">☕</span><span class="m-name">커피</span><span class="m-desc">카페에서 가볍게</span></button>
-        <button class="method-card" data-method="운동"><span class="m-emoji">🏸</span><span class="m-name">운동</span><span class="m-desc">같이 몸 움직이면서</span></button>
-        <button class="method-card" data-method="기타"><span class="m-emoji">✨</span><span class="m-name">기타</span><span class="m-desc">자유롭게 제안해주세요</span></button>
+      <p class="step-title">먼저, 성함을 알려주세요 😊</p>
+      <input type="text" id="applicantName" placeholder="이름 (예: 홍길동)" maxlength="30">
+      <div class="nav-row">
+        <span></span>
+        <button class="btn-next" id="toStep2" disabled style="opacity:.5">다음 →</button>
       </div>
     </div>
 
-    <!-- STEP 2: 하위 선택 -->
-    <div class="step-panel hidden" id="step2"></div>
-
-    <!-- STEP 3: 날짜/시간 -->
-    <div class="step-panel hidden" id="step3">
+    <!-- STEP 2: 언제 -->
+    <div class="step-panel hidden" id="step2">
       <p class="step-title">9월, 언제가 좋으세요?</p>
       <p class="hint">회색 시간대는 이미 차 있거나 제가 안 되는 시간이에요. 제 구글 캘린더와 연동돼요 (내용은 안 보이고 참/빔만!)</p>
       <div id="calendar"></div>
@@ -85,22 +83,40 @@
           <label for="exactTime">만나는 시각을 정해주세요 🕐</label>
           <input type="time" id="exactTime" step="600">
           <p class="hint" id="timeRangeHint"></p>
-          <p class="hint" id="openWarn"></p>
         </div>
       </div>
       <div class="nav-row">
-        <button class="btn-back" data-back="2">← 이전</button>
-        <button class="btn-next hidden" id="toStep4">다음 →</button>
+        <button class="btn-back" data-back="1">← 이전</button>
+        <button class="btn-next hidden" id="toStep3">다음 →</button>
       </div>
     </div>
 
-    <!-- STEP 4: 이름 + 확인 -->
-    <div class="step-panel hidden" id="step4">
-      <p class="step-title">마지막이에요! 성함을 알려주세요</p>
-      <input type="text" id="applicantName" placeholder="이름 (예: 홍길동)" maxlength="30">
+    <!-- STEP 3: 방법 -->
+    <div class="step-panel hidden" id="step3">
+      <p class="step-title">어떤 방식으로 만날까요?</p>
+      <div class="method-grid">
+        <button class="method-card" data-method="식사"><span class="m-emoji">🍚</span><span class="m-name">식사</span><span class="m-desc">추천 맛집에서 밥 한 끼</span></button>
+        <button class="method-card" data-method="커피"><span class="m-emoji">☕</span><span class="m-name">커피</span><span class="m-desc">카페에서 가볍게</span></button>
+        <button class="method-card" data-method="운동"><span class="m-emoji">🏸</span><span class="m-name">운동</span><span class="m-desc">같이 몸 움직이면서</span></button>
+        <button class="method-card" data-method="기타"><span class="m-emoji">✨</span><span class="m-name">기타</span><span class="m-desc">자유롭게 제안해주세요</span></button>
+      </div>
+      <div class="nav-row">
+        <button class="btn-back" data-back="2">← 이전</button>
+        <span></span>
+      </div>
+    </div>
+
+    <!-- STEP 4: 어디서 (동적 렌더링) -->
+    <div class="step-panel hidden" id="step4"></div>
+
+    <!-- STEP 5: 메시지 + 확인 -->
+    <div class="step-panel hidden" id="step5">
+      <p class="step-title">마지막! 하고 싶은 말을 남겨주세요 💬</p>
+      <textarea id="messageInput" rows="4" maxlength="500" placeholder="간단한 자기소개, 나누고 싶은 이야기, 하고 싶은 말 등 자유롭게 적어주세요! (선택사항)"></textarea>
+      <p class="hint">📌 신청 후 일정을 취소하거나 바꾸고 싶으시면 카톡으로 연락 주세요!</p>
       <div class="summary" id="summary"></div>
       <div class="nav-row">
-        <button class="btn-back" data-back="3">← 이전</button>
+        <button class="btn-back" data-back="4">← 이전</button>
         <button class="btn-submit" id="submitBtn">커피챗 신청하기 🚀</button>
       </div>
       <p class="hint" id="submitStatus"></p>
