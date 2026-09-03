@@ -162,7 +162,6 @@ function doPost(e) {
     var endAt = new Date(startAt.getTime() + 2 * 60 * 60 * 1000);
     CalendarApp.getDefaultCalendar().createEvent(title, startAt, endAt, {
       description: "커피챗 신청 (" + method + " / " + location + (b.isCustom ? " - 신청자 추천" : "") + ")"
-        + (message ? "\n\n💬 신청 메시지:\n" + message : "")
     });
 
     // ntfy 푸시 알림 (실패해도 예약은 성공 처리)
