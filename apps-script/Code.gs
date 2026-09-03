@@ -45,20 +45,25 @@ var BLOCKED = {
   4:  ["점심"],
   5:  ["브런치", "점심", "점저", "밤", "새벽"],
   6:  ["저녁", "밤", "새벽"],
-  7:  ["저녁", "밤"],
   8:  ["점저", "저녁"],
-  10: ["저녁", "밤"],
   11: ["저녁", "밤", "새벽"],
   13: "all",
-  14: ["저녁", "밤"],
   16: ["저녁", "밤", "새벽"],
-  17: ["저녁", "밤"],
   18: "all",
   19: "all",
   20: "all",
   21: "all",
-  22: "all",
-  28: ["저녁", "밤"]
+  22: "all"
+};
+
+// 시간대보다 잘게 막는 부분 차단 (js/data.js와 동일하게 유지!)
+// 월·목은 19~22시만 차단 → 18시대와 22·23시대는 신청 가능
+var BLOCKED_RANGES = {
+  7:  [["19:00", "22:00"]],
+  10: [["19:00", "22:00"]],
+  14: [["19:00", "22:00"]],
+  17: [["19:00", "22:00"]],
+  28: [["19:00", "22:00"]]
 };
 
 // ---------- 시트 ----------
@@ -152,6 +157,15 @@ function doPost(e) {
     if (mm % 10 !== 0) return json_({ ok: false, error: "time_out_of_slot" }); // 10분 단위만 허용
 
     if (isBlocked_(day, slot)) return json_({ ok: false, error: "slot_taken" });
+    // 부분 차단 시간 검증 (예: 월·목 19~22시)
+    var tMin = hh * 60 + mm;
+    var ranges = BLOCKED_RANGES[day] || [];
+    for (var ri = 0; ri < ranges.length; ri++) {
+      var rs = ranges[ri][0].split(":"), re = ranges[ri][1].split(":");
+      if (tMin >= (+rs[0]) * 60 + (+rs[1]) && tMin < (+re[0]) * 60 + (+re[1])) {
+        return json_({ ok: false, error: "slot_taken" });
+      }
+    }
     var busy = mergedBusy_();
     if (busy[String(day)] && busy[String(day)].indexOf(slot) >= 0) {
       return json_({ ok: false, error: "slot_taken" });

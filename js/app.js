@@ -23,13 +23,23 @@ const $$ = (sel) => document.querySelectorAll(sel);
 
 function slotByKey(key) { return SLOTS.find((s) => s.key === key); }
 
+// 부분 차단(BLOCKED_RANGES) 체크: 해당 시각(분 단위)이 막힌 구간 안인지
+function isTimeBlockedStatic(day, minutes) {
+  return (BLOCKED_RANGES[day] || []).some((r) => minutes >= toMin(r[0]) && minutes < toMin(r[1]));
+}
+
 function isSlotFree(day, slotKey) {
   const blocked = BLOCKED[day];
   if (blocked === "all") return false;
   if (Array.isArray(blocked) && blocked.includes(slotKey)) return false;
   const busy = busyMap[String(day)];
   if (busy && busy.includes(slotKey)) return false;
-  return true;
+  // 부분 차단: 시간대 안에 신청 가능한 10분 단위 시각이 하나라도 있으면 열림
+  const s = slotByKey(slotKey);
+  for (let t = s.from * 60; t < s.to * 60; t += 10) {
+    if (!isTimeBlockedStatic(day, t)) return true;
+  }
+  return false;
 }
 
 function freeSlotCount(day) {
@@ -176,6 +186,28 @@ function renderSlots() {
 }
 
 const timeSel = { h: null, m: 0 };
+const pad2 = (n) => String(n).padStart(2, "0");
+
+function freeMinutesOfHour(day, h) {
+  return [0, 10, 20, 30, 40, 50].filter((m) => !isTimeBlockedStatic(day, h * 60 + m));
+}
+
+function applyTimeSel() {
+  state.time = timeSel.h === null ? null : `${pad2(timeSel.h)}:${pad2(timeSel.m)}`;
+  updateNext2();
+}
+
+function renderMinChips() {
+  $("#minGrid").innerHTML = [0, 10, 20, 30, 40, 50].map((m) => {
+    const blockedMin = timeSel.h !== null && isTimeBlockedStatic(state.date, timeSel.h * 60 + m);
+    return `<button type="button" class="slot-chip min-chip ${m === timeSel.m ? "selected" : ""}" data-m="${m}" ${blockedMin ? "disabled" : ""}>${pad2(m)}분</button>`;
+  }).join("");
+  $$("#minGrid .min-chip:not(:disabled)").forEach((btn) => btn.addEventListener("click", () => {
+    timeSel.m = Number(btn.dataset.m);
+    $$("#minGrid .min-chip").forEach((b) => b.classList.toggle("selected", Number(b.dataset.m) === timeSel.m));
+    applyTimeSel();
+  }));
+}
 
 function showTimeInput() {
   const s = slotByKey(state.slot);
@@ -183,27 +215,22 @@ function showTimeInput() {
   $("#timeRangeHint").textContent = `${s.key} 시간대(${s.label}) 안에서 골라주세요`;
   timeSel.h = null; timeSel.m = 0;
   state.time = null;
-  const pad = (n) => String(n).padStart(2, "0");
   const hours = [];
   for (let h = s.from; h < s.to; h++) hours.push(h);
-  $("#hourGrid").innerHTML = hours.map((h) =>
-    `<button type="button" class="slot-chip hour-chip" data-h="${h}">${h}시</button>`).join("");
-  $("#minGrid").innerHTML = [0, 10, 20, 30, 40, 50].map((m) =>
-    `<button type="button" class="slot-chip min-chip ${m === 0 ? "selected" : ""}" data-m="${m}">${pad(m)}분</button>`).join("");
-  const apply = () => {
-    state.time = timeSel.h === null ? null : `${pad(timeSel.h)}:${pad(timeSel.m)}`;
-    updateNext2();
-  };
-  $$("#hourGrid .hour-chip").forEach((btn) => btn.addEventListener("click", () => {
+  $("#hourGrid").innerHTML = hours.map((h) => {
+    const noFree = freeMinutesOfHour(state.date, h).length === 0;
+    return `<button type="button" class="slot-chip hour-chip" data-h="${h}" ${noFree ? "disabled" : ""}>${h}시</button>`;
+  }).join("");
+  $$("#hourGrid .hour-chip:not(:disabled)").forEach((btn) => btn.addEventListener("click", () => {
     timeSel.h = Number(btn.dataset.h);
+    // 선택한 시에서 현재 분이 막혀 있으면 첫 가능 분으로 이동
+    const free = freeMinutesOfHour(state.date, timeSel.h);
+    if (!free.includes(timeSel.m)) timeSel.m = free.length ? free[0] : 0;
     $$("#hourGrid .hour-chip").forEach((b) => b.classList.toggle("selected", Number(b.dataset.h) === timeSel.h));
-    apply();
+    renderMinChips();
+    applyTimeSel();
   }));
-  $$("#minGrid .min-chip").forEach((btn) => btn.addEventListener("click", () => {
-    timeSel.m = Number(btn.dataset.m);
-    $$("#minGrid .min-chip").forEach((b) => b.classList.toggle("selected", Number(b.dataset.m) === timeSel.m));
-    apply();
-  }));
+  renderMinChips();
 }
 
 function validStep2() { return state.date && state.slot && state.time; }
