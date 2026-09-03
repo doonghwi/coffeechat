@@ -350,6 +350,7 @@ function pickerHTML(mode) {
     <div class="custom-wrap hidden" id="customWrap">
       <input type="text" id="customInput" placeholder="${isCafe ? "추천하고 싶은 카페를 알려주세요!" : "추천하고 싶은 맛집을 알려주세요!"}" maxlength="60">
     </div>
+    <div id="selectedBanner" class="selected-banner hidden"></div>
     ${navRowHTML()}`;
 }
 
@@ -440,6 +441,12 @@ function selectPlace(sid) {
   state.subType = "place"; state.subLabel = p.n; state.placeSid = sid;
   $("#customWrap").classList.add("hidden");
   $$("#step4 .place-item").forEach((x) => x.classList.toggle("selected", x.dataset.sid === sid));
+  // 선택됨 배너 표시 (지도 모드에서도 선택이 됐다는 걸 확실히 보여줌)
+  const banner = $("#selectedBanner");
+  if (banner) {
+    banner.classList.remove("hidden");
+    banner.innerHTML = `✔ 선택됨: <b>${p.n}</b> — 아래 <b>다음</b> 버튼을 눌러주세요!`;
+  }
   updateNext4();
 }
 window.__selectPlace = selectPlace; // 지도 인포윈도우에서 사용
@@ -501,18 +508,29 @@ function renderMarkers(list) {
       },
     });
     naver.maps.Event.addListener(marker, "click", () => {
-      pickerCtx.infoWin.setContent(`
+      const div = document.createElement("div");
+      div.innerHTML = `
         <div style="position:relative;background:#fff;border-radius:12px;box-shadow:0 4px 14px rgba(0,0,0,.25);padding:12px 30px 12px 14px;font-family:Pretendard,sans-serif;max-width:230px">
-          <button onclick="__closeInfo()" style="position:absolute;top:6px;right:6px;width:22px;height:22px;border:none;background:#f3e2cd;color:#8b5e34;border-radius:50%;font-size:12px;font-weight:700;cursor:pointer;line-height:1">✕</button>
+          <button type="button" class="iw-close" style="position:absolute;top:6px;right:6px;width:22px;height:22px;border:none;background:#f3e2cd;color:#8b5e34;border-radius:50%;font-size:12px;font-weight:700;cursor:pointer;line-height:1">✕</button>
           <b style="font-size:15px">${p.n}</b> ${p.t === 3 ? "⭐" : p.t === 2 ? "✅" : ""}
           <div style="font-size:12px;color:#8a7060;margin:4px 0">${p.c} · ${p.a}</div>
           ${menuLine(p, 3) ? `<div style="font-size:12px;color:#3b2a1f;margin:2px 0">🍽 ${menuLine(p, 3)}</div>` : ""}
           ${hoursLine(p) ? `<div style="font-size:12px;color:#8a7060;margin:2px 0">🕐 ${hoursLine(p)}</div>` : ""}
           <div style="display:flex;gap:6px;margin-top:8px">
-            <button onclick="__selectPlace('${p.sid}')" style="flex:1;background:#c47b3f;color:#fff;border:none;border-radius:8px;padding:7px;font-weight:700;cursor:pointer;font-family:inherit">이곳 선택 ✓</button>
+            <button type="button" class="iw-select" style="flex:1;background:#c47b3f;color:#fff;border:none;border-radius:8px;padding:7px;font-weight:700;cursor:pointer;font-family:inherit">이곳 선택 ✓</button>
             <a href="https://map.naver.com/p/entry/place/${p.sid}" target="_blank" rel="noopener" style="background:#f3e2cd;color:#8b5e34;border-radius:8px;padding:7px 10px;font-size:12px;font-weight:700;text-decoration:none">상세 ↗</a>
           </div>
-        </div>`);
+        </div>`;
+      div.querySelector(".iw-close").addEventListener("click", (ev) => {
+        ev.stopPropagation();
+        pickerCtx.infoWin.close();
+      });
+      div.querySelector(".iw-select").addEventListener("click", (ev) => {
+        ev.stopPropagation();
+        selectPlace(p.sid);
+        pickerCtx.infoWin.close();
+      });
+      pickerCtx.infoWin.setContent(div);
       pickerCtx.infoWin.open(pickerCtx.map, marker);
     });
     pickerCtx.markers.push(marker);
