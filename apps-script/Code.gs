@@ -170,25 +170,10 @@ function doPost(e) {
       description: "커피챗 신청 (" + method + " / " + location + (b.isCustom ? " - 신청자 추천" : "") + ")"
     });
 
-    // ntfy 푸시 알림 시도 (구글 공유 IP 할당량 때문에 429가 날 수 있음 →
-    // 실패하면 ntfy:false를 돌려주고, 프론트엔드가 신청자 브라우저에서 대신 발송)
-    var ntfyOk = false;
-    try {
-      var ntfyRes = sendNtfy_(
-        "☕ 커피챗 신청: " + name,
-        "9월 " + day + "일 " + time + " · " + method + " · " + location
-          + (b.isCustom ? " (신청자 추천)" : "")
-          + (message ? "\n\n💬 " + message : "")
-      );
-      ntfyOk = ntfyRes.getResponseCode() < 300;
-      if (!ntfyOk) {
-        try { getSheet_().appendRow(["[ntfy 실패]", ntfyRes.getResponseCode() + " " + ntfyRes.getContentText().substring(0, 200)]); } catch (ignore) {}
-      }
-    } catch (ntfyErr) {
-      try { getSheet_().appendRow(["[ntfy 실패]", String(ntfyErr)]); } catch (ignore) {}
-    }
-
-    return json_({ ok: true, ntfy: ntfyOk });
+    // ntfy 알림은 서버에서 보내지 않습니다!
+    // (구글 공유 IP 할당량 때문에 429가 나고 응답만 느려짐 →
+    //  신청 완료 화면에서 신청자의 브라우저가 직접 발송)
+    return json_({ ok: true, ntfy: false });
   } catch (err) {
     return json_({ ok: false, error: String(err) });
   } finally {

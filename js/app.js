@@ -547,6 +547,7 @@ $("#submitBtn").addEventListener("click", async () => {
 
   const btn = $("#submitBtn");
   btn.disabled = true; btn.textContent = "신청 중… ☕";
+  status.textContent = "⏳ 캘린더에 등록하는 중이에요… 10초 정도 걸릴 수 있어요!";
   try {
     const res = await fetch(CONFIG.API_URL, {
       method: "POST",
@@ -564,7 +565,8 @@ $("#submitBtn").addEventListener("click", async () => {
     });
     const out = await res.json();
     if (out.ok) {
-      // 서버에서 ntfy 발송에 실패했으면(구글 공유 IP 할당량 등) 브라우저에서 직접 발송
+      status.textContent = "";
+      // ntfy 알림은 브라우저에서 직접 발송 (서버가 이미 보냈다면 생략)
       if (!out.ntfy) {
         try {
           fetch("https://ntfy.sh/coffeechat-doonghwi?title=" +
