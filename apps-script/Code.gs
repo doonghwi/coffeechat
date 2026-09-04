@@ -4,9 +4,9 @@
  * 하는 일
  *  - GET  ?action=busy : 날짜별로 이미 찬 시간대 반환 (예약 + 내 구글 캘린더 참/빔)
  *                        → 캘린더 "내용"은 절대 내보내지 않고 참/빔 여부만 계산합니다.
- *  - POST {name, method, location, date, slot, time, message}
+ *  - POST {name, method, location, date, slot, time, endTime, message}
  *         : 슬롯 검증 → 스프레드시트에 기록 → 내 캘린더에
- *           "@@시 [이름] [위치] 커피챗" 이벤트 생성
+ *           "오전 n시~m시 [이름] [위치] 커피챗" 이벤트 생성 (시작~종료 시각 그대로)
  *           → ntfy.sh/coffeechat-doonghwi 로 푸시 알림 (신청 메시지 포함)
  *
  * 배포: 우측 상단 [배포] > 새 배포 > 유형: 웹 앱
@@ -145,44 +145,62 @@ function doPost(e) {
     var day = parseInt(b.date, 10);
     var slot = String(b.slot || "");
     var time = String(b.time || "");
+    var endTime = String(b.endTime || "");
     var message = String(b.message || "").trim().substring(0, 500);
 
-    if (!name || !location || !day || !SLOTS[slot] || !/^\d{2}:\d{2}$/.test(time)) {
+    if (!name || !location || !day || !SLOTS[slot] || !/^\d{2}:\d{2}$/.test(time) || !/^\d{2}:\d{2}$/.test(endTime)) {
       return json_({ ok: false, error: "invalid_input" });
     }
     if (day < 1 || day > 30) return json_({ ok: false, error: "invalid_date" });
 
     var hh = parseInt(time.split(":")[0], 10);
     var mm = parseInt(time.split(":")[1], 10);
+    var eh = parseInt(endTime.split(":")[0], 10);
+    var em = parseInt(endTime.split(":")[1], 10);
     var range = SLOTS[slot];
     if (hh < range[0] || hh >= range[1]) return json_({ ok: false, error: "time_out_of_slot" });
-    if (mm % 10 !== 0) return json_({ ok: false, error: "time_out_of_slot" }); // 10분 단위만 허용
+    if (mm % 10 !== 0 || em % 10 !== 0) return json_({ ok: false, error: "time_out_of_slot" }); // 10분 단위만 허용
+
+    // 종료 시각: 시작보다 뒤, 자정(24:00) 이하, 시간대 끝 또는 시작+2시간 중 늦은 쪽까지 (프론트와 동일 규칙)
+    var tMin = hh * 60 + mm;
+    var eMin = eh * 60 + em;
+    var cap = Math.min(1440, Math.max(range[1] * 60, tMin + 120));
+    if (eMin <= tMin || eMin > cap) return json_({ ok: false, error: "time_out_of_slot" });
 
     if (isBlocked_(day, slot)) return json_({ ok: false, error: "slot_taken" });
-    // 부분 차단 시간 검증 (예: 월·목 19~22시)
-    var tMin = hh * 60 + mm;
+    // 부분 차단 시간 검증 (예: 월·목 19~22시) — 신청 구간 [시작, 종료)와 겹치면 거절
     var ranges = BLOCKED_RANGES[day] || [];
     for (var ri = 0; ri < ranges.length; ri++) {
       var rs = ranges[ri][0].split(":"), re = ranges[ri][1].split(":");
-      if (tMin >= (+rs[0]) * 60 + (+rs[1]) && tMin < (+re[0]) * 60 + (+re[1])) {
-        return json_({ ok: false, error: "slot_taken" });
-      }
+      var bs = (+rs[0]) * 60 + (+rs[1]), be = (+re[0]) * 60 + (+re[1]);
+      if (tMin < be && eMin > bs) return json_({ ok: false, error: "slot_taken" });
     }
     var busy = mergedBusy_();
     if (busy[String(day)] && busy[String(day)].indexOf(slot) >= 0) {
       return json_({ ok: false, error: "slot_taken" });
     }
-
-    // 시트 기록
-    getSheet_().appendRow([new Date(), name, day, slot, time, method, location, b.isCustom ? "O" : "", message]);
-
-    // 캘린더 이벤트: "오전/오후 @@시 [이름] [위치] 커피챗" (2시간)
-    var ampm = hh < 12 ? "오전" : "오후";
-    var h12 = hh % 12; if (h12 === 0) h12 = 12;
-    var timeLabel = ampm + " " + h12 + "시" + (mm > 0 ? " " + mm + "분" : "");
-    var title = timeLabel + " " + name + " [" + location + "] 커피챗";
+    // 신청 구간이 다른 시간대의 차단 구간이나 캘린더 이벤트와 겹치는지 확인
     var startAt = new Date(YEAR, MONTH - 1, day, hh, mm);
-    var endAt = new Date(startAt.getTime() + 2 * 60 * 60 * 1000);
+    var endAt = new Date(YEAR, MONTH - 1, day, 0, 0);
+    endAt.setMinutes(eMin); // 24:00도 안전 (다음날 0시)
+    for (var sk in SLOTS) {
+      if (sk === slot) continue;
+      var ss = SLOTS[sk][0] * 60, se = SLOTS[sk][1] * 60;
+      if (tMin < se && eMin > ss && (isBlocked_(day, sk) || (busy[String(day)] && busy[String(day)].indexOf(sk) >= 0))) {
+        return json_({ ok: false, error: "slot_taken" });
+      }
+    }
+    var overlapping = CalendarApp.getDefaultCalendar().getEvents(startAt, endAt);
+    for (var oi = 0; oi < overlapping.length; oi++) {
+      if (!overlapping[oi].isAllDayEvent()) return json_({ ok: false, error: "slot_taken" });
+    }
+
+    // 시트 기록 (시간 열: "시작~종료")
+    getSheet_().appendRow([new Date(), name, day, slot, time + "~" + endTime, method, location, b.isCustom ? "O" : "", message]);
+
+    // 캘린더 이벤트: "오전 n시~m시 [이름] [위치] 커피챗"
+    //   같은 오전/오후면 "오후 1시~3시", 다르면 "오전 11시~오후 1시", 분이 있으면 "오후 1시 30분~3시"
+    var title = timeRangeLabel_(tMin, eMin) + " " + name + " [" + location + "] 커피챗";
     CalendarApp.getDefaultCalendar().createEvent(title, startAt, endAt, {
       description: "커피챗 신청 (" + method + " / " + location + (b.isCustom ? " - 신청자 추천" : "") + ")"
     });
@@ -201,6 +219,20 @@ function doPost(e) {
 function json_(o) {
   return ContentService.createTextOutput(JSON.stringify(o))
     .setMimeType(ContentService.MimeType.JSON);
+}
+
+// 분(0~1440) → { ampm: "오전"|"오후", text: "1시 30분" }
+function koTime_(min) {
+  var h = Math.floor(min / 60) % 24, m = min % 60;
+  var h12 = h % 12; if (h12 === 0) h12 = 12;
+  return { ampm: h < 12 ? "오전" : "오후", text: h12 + "시" + (m > 0 ? " " + m + "분" : "") };
+}
+
+// "오전 n시~m시" 양식. 오전/오후가 바뀌면 뒤에도 표기 ("오전 11시~오후 1시")
+function timeRangeLabel_(startMin, endMin) {
+  var s = koTime_(startMin), e = koTime_(endMin);
+  var tail = s.ampm === e.ampm ? e.text : e.ampm + " " + e.text;
+  return s.ampm + " " + s.text + "~" + tail;
 }
 
 // ntfy 발송 공통 함수: 토픽 주소로 직접 POST (제목 등 한글은 URL 인코딩)

@@ -209,12 +209,15 @@ main { max-width: 680px; margin: 0 auto; padding: 0 16px 60px; }
 
 #timeInputWrap { margin-top: 16px; }
 #timeInputWrap label { font-weight: 700; font-size: 15px; display: block; margin-bottom: 6px; }
-.time-pick-label { font-size: 13px; font-weight: 700; color: var(--sub); margin: 10px 0 6px; }
-.hour-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; }
-.min-grid { display: grid; grid-template-columns: repeat(6, 1fr); gap: 8px; }
-@media (max-width: 480px) {
-  .min-grid { grid-template-columns: repeat(3, 1fr); }
+.time-range-row { display: flex; align-items: center; gap: 10px; margin-top: 8px; }
+.time-select {
+  flex: 1; min-width: 0; border: 1.5px solid #e0d2bd; border-radius: 10px; padding: 10px 12px;
+  font-family: inherit; font-size: 15px; font-weight: 700; background: #fff; color: var(--ink);
+  cursor: pointer;
 }
+.time-select:focus { outline: none; border-color: var(--accent); }
+.time-select:disabled { background: #efe6d5; color: #c4b49c; cursor: not-allowed; }
+.time-tilde { font-weight: 700; color: var(--sub); flex: none; }
 
 /* Nav / buttons */
 .nav-row { display: flex; justify-content: space-between; margin-top: 20px; gap: 10px; }

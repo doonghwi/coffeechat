@@ -80,12 +80,13 @@
         <p class="slot-date-label" id="slotDateLabel"></p>
         <div class="slot-grid" id="slotGrid"></div>
         <div id="timeInputWrap" class="hidden">
-          <label>만나는 시각을 정해주세요 🕐</label>
+          <label>만나는 시간을 정해주세요 🕐</label>
           <p class="hint" id="timeRangeHint"></p>
-          <div class="time-pick-label">시</div>
-          <div class="hour-grid" id="hourGrid"></div>
-          <div class="time-pick-label">분</div>
-          <div class="min-grid" id="minGrid"></div>
+          <div class="time-range-row">
+            <select class="time-select" id="startSel" aria-label="시작 시각"></select>
+            <span class="time-tilde">~</span>
+            <select class="time-select" id="endSel" aria-label="종료 시각" disabled></select>
+          </div>
         </div>
       </div>
       <div class="nav-row">
